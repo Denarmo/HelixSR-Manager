@@ -255,6 +255,45 @@ namespace HelixSRSwapper
             };
 
             // Locate Cover Art
+            LocateCoverArt(game);
+
+            // Walk Game Directory up to depth 6
+            ProcessGameDirectory(game, gameFolder);
+
+            // Check if OptiScaler route is currently installed
+            bool optiInstalled = CheckOptiScalerRoute(game);
+
+            // Check if Direct FSR 3.1 replacement route is currently installed
+            bool directInstalled = CheckDirectRoute(game);
+
+            if (optiInstalled)
+            {
+                game.Route = "optiscaler";
+                game.Installed = true;
+            }
+            else if (directInstalled)
+            {
+                game.Route = "direct";
+                game.Installed = true;
+            }
+            else if (game.FsrTargets.Count > 0)
+            {
+                game.Route = "direct";
+            }
+            else if (game.Inputs.Count > 0)
+            {
+                game.Route = "optiscaler";
+            }
+            else
+            {
+                game.Route = null;
+            }
+
+            return game;
+        }
+
+        private static void LocateCoverArt(GameInfo game)
+        {
             if (!string.IsNullOrEmpty(game.AppId))
             {
                 string foundCover = null;
@@ -302,8 +341,10 @@ namespace HelixSRSwapper
                 game.LocalHeroPath = foundHero;
                 game.RemoteHeroUrl = string.Format("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/{0}/library_hero.jpg", game.AppId);
             }
+        }
 
-            // Walk Game Directory up to depth 6
+        private static void ProcessGameDirectory(GameInfo game, string gameFolder)
+        {
             var detectedInputs = new HashSet<string>();
             var fsrTargets = new List<string>();
             string bestExeDir = null;
@@ -329,8 +370,10 @@ namespace HelixSRSwapper
             game.FsrTargets = fsrTargets;
             game.IsReEngine = DetectReEngine(gameFolder, game);
             game.InstallReFramework = game.IsReEngine || File.Exists(Path.Combine(game.ExeFolder ?? gameFolder, "reframework_revision.txt"));
+        }
 
-            // Check if OptiScaler route is currently installed
+        private static bool CheckOptiScalerRoute(GameInfo game)
+        {
             bool optiInstalled = false;
             if (!string.IsNullOrEmpty(game.ExeFolder))
             {
@@ -358,8 +401,11 @@ namespace HelixSRSwapper
                 if (File.Exists(Path.Combine(helixDir, "helixsr.log")) || File.Exists(Path.Combine(game.ExeFolder, "OptiScaler.log"))) game.HasLogs = true;
                 if (Directory.Exists(Path.Combine(helixDir, MyFsrFolder))) game.HasMyFsr = true;
             }
+            return optiInstalled;
+        }
 
-            // Check if Direct FSR 3.1 replacement route is currently installed
+        private static bool CheckDirectRoute(GameInfo game)
+        {
             bool directInstalled = false;
             foreach (var target in game.FsrTargets)
             {
@@ -396,31 +442,7 @@ namespace HelixSRSwapper
                     catch { }
                 }
             }
-
-            if (optiInstalled)
-            {
-                game.Route = "optiscaler";
-                game.Installed = true;
-            }
-            else if (directInstalled)
-            {
-                game.Route = "direct";
-                game.Installed = true;
-            }
-            else if (game.FsrTargets.Count > 0)
-            {
-                game.Route = "direct";
-            }
-            else if (game.Inputs.Count > 0)
-            {
-                game.Route = "optiscaler";
-            }
-            else
-            {
-                game.Route = null;
-            }
-
-            return game;
+            return directInstalled;
         }
 
         private static void ScanDirRecursive(string dir, int depth, int maxDepth, HashSet<string> inputs, List<string> fsrTargets, ref string bestExeDir, ref long bestExeSize, ref string bestExeName, ref GameInfo game)

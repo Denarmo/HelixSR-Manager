@@ -328,6 +328,7 @@ namespace HelixSRSwapper
                             if (data.ContainsKey("helixsr")) game.Version = data["helixsr"].ToString();
                             if (data.ContainsKey("optiscaler")) game.OptiDllName = data["optiscaler"].ToString();
                             if (data.ContainsKey("fakenvapi") && data["fakenvapi"] is bool) game.UseFakeNvapi = (bool)data["fakenvapi"];
+                            if (data.ContainsKey("fg_mode") && data["fg_mode"] != null) game.FgMode = data["fg_mode"].ToString();
                         }
                     }
                     catch { }
@@ -433,9 +434,26 @@ namespace HelixSRSwapper
                         inputs.Add("DLSS");
                         game.FoundNvngxDlssPath = f;
                     }
+                    else if (lower == "nvngx_dlssg.dll" || lower == "sl.dlss_g.dll")
+                    {
+                        inputs.Add("DLSS-G");
+                        game.HasDlssG = true;
+                    }
                     else if (lower == "libxess.dll")
                     {
                         inputs.Add("XeSS");
+                    }
+                    else if (lower == "libxess_fg.dll")
+                    {
+                        game.FoundXeFgPath = f;
+                    }
+                    else if (lower == "libxell.dll")
+                    {
+                        game.FoundXeLlPath = f;
+                    }
+                    else if (lower == "amd_fidelityfx_framegeneration_dx12.dll")
+                    {
+                        game.FoundFfxFgPath = f;
                     }
                     else if (lower == "ffx_fsr2_api_x64.dll" || lower == "ffx_fsr2_api_dx12_x64.dll")
                     {
@@ -579,8 +597,12 @@ namespace HelixSRSwapper
                 var createdList = new List<string>();
 
                 string optiName = !string.IsNullOrEmpty(game.OptiDllName) ? game.OptiDllName : "dxgi.dll";
+                string fgMode = !string.IsNullOrEmpty(game.FgMode) ? game.FgMode : "auto";
+                if (fgMode.StartsWith("dlssg_")) game.UseFakeNvapi = true;
+
                 rec["optiscaler"] = optiName;
                 rec["fakenvapi"] = game.UseFakeNvapi;
+                rec["fg_mode"] = fgMode;
 
                 // Backup existing wrapper DLL if present
                 string currentTarget = Path.Combine(t, optiName);
@@ -679,6 +701,29 @@ namespace HelixSRSwapper
                     File.Copy(srcAmdFsr, Path.Combine(helixDir, AmdFsrFile), true);
                 }
 
+                // Copy optional Frame Generation DLLs from Core my-fsr or Game my-fsr if present
+                string coreMyFsr = Path.Combine(CoreDir, MyFsrFolder);
+                string[] fgOptFiles = new string[] { "amd_fidelityfx_framegeneration_dx12.dll", "libxess_fg.dll", "libxell.dll" };
+                foreach (var fgFile in fgOptFiles)
+                {
+                    string srcCoreFg = Path.Combine(coreMyFsr, fgFile);
+                    string srcGameFg = Path.Combine(myFsrDir, fgFile);
+                    string dstHelixFg = Path.Combine(helixDir, fgFile);
+                    if (File.Exists(srcGameFg)) File.Copy(srcGameFg, dstHelixFg, true);
+                    else if (File.Exists(srcCoreFg)) File.Copy(srcCoreFg, dstHelixFg, true);
+                }
+
+                // Copy dlssg_to_fsr3_amd_is_better.dll next to game exe if present in my-fsr
+                string nukemName = "dlssg_to_fsr3_amd_is_better.dll";
+                string srcNukemGame = Path.Combine(myFsrDir, nukemName);
+                string srcNukemCore = Path.Combine(coreMyFsr, nukemName);
+                string dstNukem = Path.Combine(t, nukemName);
+                if (File.Exists(srcNukemGame) || File.Exists(srcNukemCore))
+                {
+                    if (!File.Exists(dstNukem)) createdList.Add(nukemName);
+                    File.Copy(File.Exists(srcNukemGame) ? srcNukemGame : srcNukemCore, dstNukem, true);
+                }
+
                 // Mirror HelixSR files to _storage_ subfolder if game uses Capcom RE Engine / REFramework
                 string subStorage = Path.Combine(t, "_storage_");
                 if (Directory.Exists(subStorage))
@@ -700,13 +745,65 @@ namespace HelixSRSwapper
                 // Clear any broken/corrupted shader caches from previous crashes so game compiles fresh clean shaders
                 ClearShaderCache(game);
 
-                // Configure OptiScaler.ini with official HelixSR backend
+                // Configure OptiScaler.ini with official HelixSR backend & Frame Generation settings
                 if (File.Exists(gameIni))
                 {
                     string text = File.ReadAllText(gameIni);
                     text = SetIniValue(text, "Dx12Upscaler", "fsr31", "Upscalers");
                     text = SetIniValue(text, "FfxDx12Path", Path.Combine(helixDir, OwnDll), "Libraries");
                     text = SetIniValue(text, "FfxDx12SRPath", Path.Combine(helixDir, OwnSrDll), "Libraries");
+
+                    // Decouple FfxDx12FGPath from HelixSR SR-only DLL so FidelityFX Frame Generation works simultaneously
+                    string ffxFgHelix = Path.Combine(helixDir, "amd_fidelityfx_framegeneration_dx12.dll");
+                    if (File.Exists(ffxFgHelix))
+                        text = SetIniValue(text, "FfxDx12FGPath", ffxFgHelix, "Libraries");
+                    else if (!string.IsNullOrEmpty(game.FoundFfxFgPath) && File.Exists(game.FoundFfxFgPath))
+                        text = SetIniValue(text, "FfxDx12FGPath", game.FoundFfxFgPath, "Libraries");
+
+                    string xeFgHelix = Path.Combine(helixDir, "libxess_fg.dll");
+                    if (File.Exists(xeFgHelix))
+                        text = SetIniValue(text, "XeFGPath", xeFgHelix, "Libraries");
+                    else if (!string.IsNullOrEmpty(game.FoundXeFgPath) && File.Exists(game.FoundXeFgPath))
+                        text = SetIniValue(text, "XeFGPath", game.FoundXeFgPath, "Libraries");
+
+                    string xeLlHelix = Path.Combine(helixDir, "libxell.dll");
+                    if (File.Exists(xeLlHelix))
+                        text = SetIniValue(text, "XeLLPath", xeLlHelix, "Libraries");
+                    else if (!string.IsNullOrEmpty(game.FoundXeLlPath) && File.Exists(game.FoundXeLlPath))
+                        text = SetIniValue(text, "XeLLPath", game.FoundXeLlPath, "Libraries");
+
+                    if (fgMode == "dlssg_xefg")
+                    {
+                        text = SetIniValue(text, "Enabled", "true", "FrameGen");
+                        text = SetIniValue(text, "FGInput", "dlssg", "FrameGen");
+                        text = SetIniValue(text, "FGOutput", "xefg", "FrameGen");
+                    }
+                    else if (fgMode == "dlssg_fsrfg")
+                    {
+                        text = SetIniValue(text, "Enabled", "true", "FrameGen");
+                        text = SetIniValue(text, "FGInput", "dlssg", "FrameGen");
+                        text = SetIniValue(text, "FGOutput", "fsrfg", "FrameGen");
+                    }
+                    else if (fgMode == "dlssg_nukems")
+                    {
+                        text = SetIniValue(text, "Enabled", "true", "FrameGen");
+                        text = SetIniValue(text, "FGInput", "nukems", "FrameGen");
+                        text = SetIniValue(text, "FGOutput", "nukems", "FrameGen");
+                    }
+                    else if (fgMode == "optifg_fsrfg")
+                    {
+                        text = SetIniValue(text, "Enabled", "true", "FrameGen");
+                        text = SetIniValue(text, "FGInput", "upscaler", "FrameGen");
+                        text = SetIniValue(text, "FGOutput", "fsrfg", "FrameGen");
+                        text = SetIniValue(text, "HUDFix", "true", "OptiFG");
+                    }
+                    else
+                    {
+                        text = SetIniValue(text, "Enabled", "auto", "FrameGen");
+                        text = SetIniValue(text, "FGInput", "auto", "FrameGen");
+                        text = SetIniValue(text, "FGOutput", "auto", "FrameGen");
+                    }
+
                     File.WriteAllText(gameIni, text);
                 }
 

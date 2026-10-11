@@ -447,9 +447,13 @@
           <h3 style="color: #f1c40f; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px;">Installation Method &amp; Hooks</h3>
           <select id="drawer-install-method" class="form-input" style="width: 100%; margin-bottom: 8px;"></select>
           <p id="drawer-method-hint" style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4;"></p>
+          <div id="drawer-fg-wrap" style="margin-bottom: 10px;">
+            <h4 style="color: #2ecc71; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 5px;">Frame Generation (DLSS-G Hook / OptiFG)</h4>
+            <select id="drawer-fg-mode" class="form-input" style="width: 100%;"></select>
+          </div>
           <label id="drawer-fakenvapi-wrap" class="checkbox-label" style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; margin-bottom: 6px; cursor: pointer;">
             <input type="checkbox" id="drawer-chk-fakenvapi" checked>
-            <span>Deploy FakeNVAPI (<code>fakenvapi.dll</code>) to unlock DLSS on AMD/Intel GPUs</span>
+            <span>Deploy FakeNVAPI (<code>fakenvapi.dll</code>) to unlock DLSS &amp; DLSS-G on AMD/Intel GPUs</span>
           </label>
           <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; cursor: pointer;">
             <input type="checkbox" id="drawer-chk-reframework">

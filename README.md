@@ -1,6 +1,6 @@
 # ⚡ HelixSR Manager
 
-[![Release](https://img.shields.io/badge/Release-v1.7.0-F1C40F?style=for-the-badge)](https://github.com/Denarmo/HelixSR-Manager/releases)
+[![Release](https://img.shields.io/badge/Release-v1.8.0-F1C40F?style=for-the-badge)](https://github.com/Denarmo/HelixSR-Manager/releases)
 [![HelixSR Core](https://img.shields.io/badge/HelixSR_Core-v1.7.0-39D5FF?style=for-the-badge)](https://github.com/lonewolf0622/HelixSR)
 [![Platform](https://img.shields.io/badge/Platform-Windows_10%2F11_%7C_Linux_%26_SteamOS-10B981?style=for-the-badge)](#%EF%B8%8F-installation--quick-start)
 [![Dependencies](https://img.shields.io/badge/Dependencies-Zero_(100%25_Standalone)-8B5CF6?style=for-the-badge)](#%EF%B8%8F-installation--quick-start)
@@ -24,12 +24,13 @@
 2. [🧠 How It Works (Architecture & Injection Routes)](#-how-it-works-architecture--injection-routes)
 3. [⬇️ Installation & Quick Start](#%EF%B8%8F-installation--quick-start)
 4. [📖 Step-by-Step Usage Guide](#-step-by-step-usage-guide)
-5. [🔄 Switching Between HelixSR & Custom FSR (`my-fsr`)](#-switching-between-helixsr--custom-fsr-my-fsr)
-6. [🛠️ Building from Source](#%EF%B8%8F-building-from-source)
-7. [📂 Repository Structure](#-repository-structure)
-8. [🔧 Troubleshooting & FAQ](#-troubleshooting--faq)
-9. [🙏 Referenced Projects, Credits & Acknowledgments](#-referenced-projects-credits--acknowledgments)
-10. [⚖️ Legal Disclaimers, Licensing & Third-Party Notices](#%EF%B8%8F-legal-disclaimers-licensing--third-party-notices)
+5. [🎞️ DLSS Frame Generation (`DLSS-G`) Hook & Translation](#%EF%B8%8F-dlss-frame-generation-dlss-g-hook--translation)
+6. [🔄 Switching Between HelixSR & Custom FSR (`my-fsr`)](#-switching-between-helixsr--custom-fsr-my-fsr)
+7. [🛠️ Building from Source](#%EF%B8%8F-building-from-source)
+8. [📂 Repository Structure](#-repository-structure)
+9. [🔧 Troubleshooting & FAQ](#-troubleshooting--faq)
+10. [🙏 Referenced Projects, Credits & Acknowledgments](#-referenced-projects-credits--acknowledgments)
+11. [⚖️ Legal Disclaimers, Licensing & Third-Party Notices](#%EF%B8%8F-legal-disclaimers-licensing--third-party-notices)
 
 ---
 
@@ -52,7 +53,7 @@
 - **Offline-First High-Resolution Cover & Hero Artwork**:
   - Loads vertical `600x900` box art and widescreen hero banners directly from your local Steam `appcache/librarycache`, with automatic multi-CDN fallback and local disk caching (`%LOCALAPPDATA%\HelixSR\cache\covers`).
 - **Smart Upscaler & Engine Telemetry**:
-  - Recursively inspects game directories (up to 6 levels deep) to identify the primary shipping executable, supported upscaler inputs (`DLSS`, `XeSS`, `FSR 2`, `FSR 3.1`), and **Capcom RE Engine** titles.
+  - Recursively inspects game directories (up to 6 levels deep) to identify the primary shipping executable, supported upscaler & Frame Generation inputs (`DLSS`, `DLSS-G`, `XeSS`, `FSR 2`, `FSR 3.1`), and **Capcom RE Engine** titles.
   - Quick filter pills (`All Games`, `⚡ HelixSR Active`, `○ Not Installed`, `🎯 Direct FSR 3.1`, `🔌 OptiScaler Hook`, `🧬 Capcom RE Engine`), instant search (<kbd>Ctrl</kbd>+<kbd>K</kbd>), sorting, and Grid/List view modes.
 
 ### ⚡ Built-in Neural Network & Shader Compiler Wizard
@@ -63,11 +64,13 @@
   - Includes an optional **Wave64 (`--wave64`)** toggle to compile 64-lane compute shaders alongside wave32 shaders for **AMD RDNA 3 and RDNA 4** GPUs.
   - **Auto-Sync**: Automatically propagates newly compiled network weights and kernel packages to all currently installed games.
 
-### 🔌 Advanced Hook & Compatibility Controls
+### 🔌 Advanced Hook, Frame Generation & Compatibility Controls
 - **Per-Game Route & Proxy Selection**:
   - Switch freely between **Direct FSR 3.1 Replacement** and **OptiScaler Proxy Injection** (`dxgi.dll`, `winmm.dll`, `version.dll`, `dbghelp.dll`, `d3d12.dll`, `wininet.dll`, `winhttp.dll`, or `OptiScaler.asi`).
+- **DLSS Frame Generation (`DLSS-G`) Hook & Translation**:
+  - Unlock the in-game **NVIDIA DLSS Frame Generation** toggle on AMD and Intel GPUs via `fakenvapi.dll` + OptiScaler (`FGInput = dlssg`) and translate it to **Intel XeSS Frame Generation (`XeFG`)**, **AMD FidelityFX Frame Generation (`FSR-FG`)**, **Nukem's `dlssg-to-fsr3`**, or **Universal `OptiFG`** — while simultaneously running **HelixSR (DLSS Model E)** for Super Resolution!
 - **FakeNVAPI Integration (`fakenvapi.dll`)**:
-  - Optional per-game checkbox to deploy `fakenvapi.dll` and `fakenvapi.ini`, spoofing NVAPI presence so games unlock the native **NVIDIA DLSS** selection inside their graphics menu on AMD and Intel GPUs.
+  - Optional per-game checkbox to deploy `fakenvapi.dll` and `fakenvapi.ini`, spoofing NVAPI & Reflex presence so games unlock native **NVIDIA DLSS** and **DLSS Frame Generation** options inside their graphics menu on AMD and Intel GPUs.
 - **Capcom RE Engine & REFramework Nightly Automation**:
   - Automatically detects Capcom RE Engine titles (*Dragon's Dogma 2*, *Monster Hunter Wilds*, *Monster Hunter Rise*, *Resident Evil 2 / 3 / 4 / 7 / Village*, *Pragmata*, *Street Fighter 6*, *Devil May Cry 5*, *Kunitsu-Gami*, *Dead Rising Deluxe Remaster*, etc.).
   - Optional one-click download and deployment of **[REFramework Nightly](https://github.com/praydog/REFramework-nightly)** (`dinput8.dll`), `_storage_` directory mirroring, and automatic `config.ini` sanitization (resetting stale `[Render/Adapter]` GPU locks and incompatible Reflex flags).
@@ -110,7 +113,7 @@ When you click **Install HelixSR** on a game, HelixSR Manager automatically sele
 
 | Route | Target Games | What HelixSR Manager Deploys | What to Select In-Game |
 | :--- | :--- | :--- | :--- |
-| **Route A: OptiScaler Proxy** | Games with **DLSS**, **XeSS**, or **FSR 2** (`nvngx_dlss.dll`, `libxess.dll`, `ffx_fsr2_api_*.dll`) | • Copies `OptiScaler.dll` next to the game's `.exe` as your chosen proxy hook (default `dxgi.dll`).<br>• Deploys `fakenvapi.dll` + `fakenvapi.ini` (if enabled) to unlock DLSS on AMD/Intel GPUs.<br>• Creates `<ExeFolder>\HelixSR\` containing `helixsr.dll`, `helixsr_upscaler.dll`, `helixsr_weights.bin`, `helixsr_kernels.pak`, fallback `amd_fidelityfx_upscaler_dx12.amd.dll`, and `my-fsr\`.<br>• Configures `OptiScaler.ini` (`Dx12Upscaler = fsr31`, `FfxDx12Path`, `FfxDx12SRPath`) to route upscaling calls to HelixSR.<br>• Backs up any pre-existing proxy DLL or `OptiScaler.ini` in `<ExeFolder>\HelixSR\backup\`. | **NVIDIA DLSS**<br>*(or XeSS / FSR 2 if DLSS is hidden)* |
+| **Route A: OptiScaler Proxy** | Games with **DLSS**, **DLSS-G**, **XeSS**, or **FSR 2** (`nvngx_dlss.dll`, `nvngx_dlssg.dll`, `libxess.dll`, `ffx_fsr2_api_*.dll`) | • Copies `OptiScaler.dll` next to the game's `.exe` as your chosen proxy hook (default `dxgi.dll`).<br>• Deploys `fakenvapi.dll` + `fakenvapi.ini` (if enabled) to unlock DLSS & DLSS-G on AMD/Intel GPUs.<br>• Creates `<ExeFolder>\HelixSR\` containing `helixsr.dll`, `helixsr_upscaler.dll`, `helixsr_weights.bin`, `helixsr_kernels.pak`, fallback `amd_fidelityfx_upscaler_dx12.amd.dll`, and `my-fsr\`.<br>• Configures `OptiScaler.ini` (`Dx12Upscaler = fsr31`, `FfxDx12Path`, `FfxDx12SRPath`, plus decoupled `FfxDx12FGPath`, `XeFGPath`, `XeLLPath`, and `[FrameGen]` settings).<br>• Backs up any pre-existing proxy DLL or `OptiScaler.ini` in `<ExeFolder>\HelixSR\backup\`. | **NVIDIA DLSS**<br>*(or XeSS / FSR 2 if DLSS is hidden)* |
 | **Route B: Direct FSR 3.1** | Games with native **AMD FSR 3.1** (`amd_fidelityfx_upscaler_dx12.dll` or `amd_fidelityfx_dx12.dll`) | • Renames the game's original FidelityFX DX12 DLL to `*.original.dll`.<br>• Places HelixSR's `amd_fidelityfx_dx12.dll` in its place alongside `helixsr_weights.bin`, `helixsr_kernels.pak`, and `helixsr-install.json`.<br>• Runs directly with zero proxy wrapper overhead. | **AMD FSR 3 / FSR 3.1** |
 
 ---
@@ -160,7 +163,8 @@ Because NVIDIA's DLSS weights cannot be redistributed, you must compile them onc
 4. Review or customize the **Installation Method & Hooks**:
    - **Direct FSR 3.1 Replacement**: Recommended for games with native FSR 3.1 DLLs (and often the most stable choice for Capcom RE Engine titles).
    - **OptiScaler Proxy (`dxgi.dll`, `winmm.dll`, `version.dll`, etc.)**: Recommended for games with DLSS, XeSS, or FSR 2. If a game conflicts with `dxgi.dll`, simply select `winmm.dll` or `version.dll` from the dropdown.
-   - **Deploy FakeNVAPI (`fakenvapi.dll`)**: Leave checked on AMD/Intel GPUs when using OptiScaler so the game allows selecting NVIDIA DLSS in its menus.
+   - **Frame Generation (`DLSS-G Hook / OptiFG`)**: Choose whether to keep the game's default Frame Generation or hook in-game **DLSS Frame Generation** (`XeFG`, `FSR-FG`, `Nukem's dlssg-to-fsr3`, or `Universal OptiFG`).
+   - **Deploy FakeNVAPI (`fakenvapi.dll`)**: Leave checked on AMD/Intel GPUs when using OptiScaler so the game allows selecting NVIDIA DLSS & DLSS Frame Generation in its menus.
    - **Install REFramework Nightly (`dinput8.dll`)**: Automatically checked for detected Capcom RE Engine games to prevent startup or hook crashes.
 5. Click **⚡ Install HelixSR**.
 
@@ -173,7 +177,7 @@ Because NVIDIA's DLSS weights cannot be redistributed, you must compile them onc
    WINEDLLOVERRIDES="dxgi,dinput8=n,b" %command%
    ```
 3. Open the game's **Graphics / Display Settings**:
-   - If installed via **OptiScaler Route**: Enable **NVIDIA DLSS** (or **Intel XeSS** / **AMD FSR 2** if DLSS is not offered) and pick your desired quality mode (*Quality*, *Balanced*, *Performance*, *Ultra Performance*, or *DLAA*).
+   - If installed via **OptiScaler Route**: Enable **NVIDIA DLSS** (or **Intel XeSS** / **AMD FSR 2** if DLSS is not offered) and pick your desired quality mode (*Quality*, *Balanced*, *Performance*, *Ultra Performance*, or *DLAA*). If you selected a **DLSS-G** Frame Generation mode, also enable **DLSS Frame Generation** in the game's settings.
    - If installed via **Direct FSR 3.1 Route**: Enable **AMD FSR 3 / FSR 3.1** and pick your desired quality mode.
 
 ---
@@ -191,6 +195,26 @@ Because NVIDIA's DLSS weights cannot be redistributed, you must compile them onc
 | <kbd>F5</kbd> | Rescan all Steam libraries and custom game folders |
 | <kbd>Esc</kbd> | Close the open Game Inspector Drawer or clear the search query |
 | <kbd>Insert</kbd> *(In-Game)* | Open the **OptiScaler** overlay menu (for games using the OptiScaler route) |
+
+---
+
+## 🎞️ DLSS Frame Generation (`DLSS-G`) Hook & Translation
+
+Games that ship with **NVIDIA DLSS Frame Generation** (`nvngx_dlssg.dll` / `sl.dlss_g.dll`) are automatically tagged with an amber **`DLSS-G`** badge in your library.
+
+While `nvngx_dlssg.dll` itself relies on proprietary NVIDIA Optical Flow Accelerator (OFA) driver callbacks, **HelixSR Manager** lets you unlock the game's native **DLSS Frame Generation** toggle on AMD GPUs (via `fakenvapi.dll` + OptiScaler's `FGInput = dlssg` hook) and route those HUD-less color, depth, and motion vector buffers to any DX12 Frame Generation backend — **all while HelixSR runs NVIDIA's DLSS Model E neural network for Super Resolution**:
+
+| Frame Generation Mode | INI Configuration | How It Works & Required DLLs in `my-fsr` (or Game Folder) |
+| :--- | :--- | :--- |
+| **Game Default / Pass-Through** | `Enabled = auto`<br>`FGInput = auto`<br>`FGOutput = nofg` | Leaves Frame Generation untouched so you can use the game's built-in FSR 3 Frame Generation or play without FG. |
+| **DLSS-G Hook → Intel XeFG** *(AI Neural FG on AMD)* | `Enabled = true`<br>`FGInput = dlssg`<br>`FGOutput = xefg` | Hooks in-game **DLSS Frame Generation** and executes **Intel XeSS Frame Generation (`libxess_fg.dll`)** + **XeLL Low Latency (`libxell.dll`)**, which runs AI neural optical flow and frame interpolation via standard DX12 Shader Model 6.6 on AMD RDNA GPUs. |
+| **DLSS-G Hook → AMD FidelityFX FG** | `Enabled = true`<br>`FGInput = dlssg`<br>`FGOutput = fsrfg` | Hooks in-game **DLSS Frame Generation** and routes it to `amd_fidelityfx_framegeneration_dx12.dll` (decoupled via `FfxDx12FGPath` so HelixSR handles Super Resolution while FidelityFX handles Frame Generation). |
+| **DLSS-G Hook → Nukem's `dlssg-to-fsr3`** | `Enabled = true`<br>`FGInput = dlssg`<br>`FGOutput = nukems` | Uses **[Nukem9's `dlssg_to_fsr3_amd_is_better.dll`](https://github.com/Nukem9/dlssg-to-fsr3)** to translate Streamline `sl.dlss_g` swapchains cleanly into FSR 3.1 Frame Generation. |
+| **Universal OptiFG (`Upscaler + HUDFix`)** | `Enabled = true`<br>`FGInput = upscaler`<br>`FGOutput = fsrfg`<br>`HUDFix = true` | Adds Frame Generation to **any** DLSS/XeSS/FSR2 game (even games without native DLSS-G) by reusing upscaler motion vectors & depth and applying OptiScaler's automatic `HUDFix`. |
+
+> [!TIP]
+> **Where to place optional Frame Generation DLLs:**
+> Click **📦 Custom FSR (`my-fsr`)** → **📂 Open Core my-fsr Folder** (`helixsr_core/HelixSR-1.7.0/my-fsr/`) and drop in `libxess_fg.dll`, `libxell.dll`, `amd_fidelityfx_framegeneration_dx12.dll`, or `dlssg_to_fsr3_amd_is_better.dll`. HelixSR Manager automatically detects and deploys them to your games and wires `FfxDx12FGPath`, `XeFGPath`, and `XeLLPath` in `OptiScaler.ini`!
 
 ---
 
@@ -262,7 +286,7 @@ HelixSR-Manager/
         ├── setup/                       # PTX-to-HLSL translator, weight extractor & kernel headers
         ├── optiscaler/                  # Unmodified OptiScaler v0.9.4 (GPL-3.0) & fakenvapi (MIT)
         ├── amd-fsr/                     # Unmodified AMD FidelityFX Upscaler v4.1.1 DLL & license
-        ├── my-fsr/                      # Drop-in directory for user-supplied custom FSR DLLs
+        ├── my-fsr/                      # Drop-in directory for user-supplied custom FSR & FG DLLs
         ├── LICENSE                      # HelixSR Freeware License
         ├── LICENSE-APACHE-2.0           # Apache License 2.0 for setup scripts
         ├── SOURCE.md                    # Upstream source code & binary provenance disclosures
@@ -280,7 +304,7 @@ HelixSR-Manager/
   1. Click the **🧹 Cache** button in the Game Drawer to clear stale `shader.cache2` / DirectX 12 pipeline caches.
   2. If using **OptiScaler (`dxgi.dll`)**, try switching the hook dropdown to **`winmm.dll`** or **`version.dll`**, or switch to **Direct FSR 3.1 Replacement** if the game natively supports FSR 3.1.
   3. For **Capcom RE Engine** games (*Dragon's Dogma 2*, *Monster Hunter Wilds*, *Resident Evil*, *Pragmata*), ensure **Install REFramework Nightly (`dinput8.dll`)** is checked, or try **Direct FSR 3.1 Replacement**.
-- **NVIDIA DLSS option is greyed out in-game:**
+- **NVIDIA DLSS or DLSS Frame Generation option is greyed out in-game:**
   - Ensure **Deploy FakeNVAPI (`fakenvapi.dll`)** is checked in the Game Drawer and click **Update / Reinstall**. Alternatively, select **Intel XeSS** or **AMD FSR 2** in the game's graphics menu — OptiScaler routes those inputs to HelixSR as well.
 - **Where are the diagnostic logs located?**
   - Open the game's drawer in HelixSR Manager and click the **📋 Logs** tab to read both `helixsr.log` and `OptiScaler.log` directly inside the app.
@@ -294,8 +318,10 @@ HelixSR-Manager/
 | Project | Author / Maintainer | Role in HelixSR Manager | License |
 | :--- | :--- | :--- | :--- |
 | **[HelixSR](https://github.com/lonewolf0622/HelixSR)** | **[lonewolf0622](https://github.com/lonewolf0622)** | Core Direct3D 12 DLSS Model E compute shader runtime (`amd_fidelityfx_dx12.dll`, v1.7.0) and PTX-to-HLSL network compiler (`setup/`). | HelixSR Freeware License & Apache-2.0 |
-| **[OptiScaler](https://github.com/OptiScaler/OptiScaler)** | **OptiScaler Contributors** ([cdozdil](https://github.com/cdozdil) et al.) | Unmodified official release (`v0.9.4`) used as an upscaler proxy to route DLSS, XeSS, and FSR 2 inputs to HelixSR. | GNU GPL v3.0 |
-| **[fakenvapi](https://github.com/FakeMichau/fakenvapi)** | **[FakeMichau](https://github.com/FakeMichau)** | Unmodified NVAPI translation layer (`fakenvapi.dll`) bundled with OptiScaler to unlock DLSS UI options on AMD and Intel GPUs. | MIT License |
+| **[OptiScaler](https://github.com/OptiScaler/OptiScaler)** | **OptiScaler Contributors** ([cdozdil](https://github.com/cdozdil) et al.) | Unmodified official release (`v0.9.4`) used as an upscaler and Frame Generation proxy (`FGInput = dlssg` / `OptiFG`) to route DLSS, XeSS, and FSR 2 inputs to HelixSR. | GNU GPL v3.0 |
+| **[fakenvapi](https://github.com/FakeMichau/fakenvapi)** | **[FakeMichau](https://github.com/FakeMichau)** | Unmodified NVAPI & Reflex translation layer (`fakenvapi.dll`) bundled with OptiScaler to unlock DLSS and DLSS Frame Generation UI options on AMD and Intel GPUs. | MIT License |
+| **[dlssg-to-fsr3](https://github.com/Nukem9/dlssg-to-fsr3)** | **[Nukem9](https://github.com/Nukem9)** | Optional user-supplied Streamline `dlssg` to FSR 3.1 Frame Generation swapchain translator (`dlssg_to_fsr3_amd_is_better.dll`) supported via `FGOutput = nukems`. | LGPL-3.0 |
+| **[Intel XeSS SDK (`XeFG` / `XeLL`)](https://github.com/intel/xess)** | **Intel Corporation** | Optional user-supplied AI Frame Generation & Low Latency libraries (`libxess_fg.dll`, `libxell.dll`) supported via `FGOutput = xefg`. | Intel XeSS License |
 | **[REFramework](https://github.com/praydog/REFramework)** & **[REFramework-nightly](https://github.com/praydog/REFramework-nightly)** | **[praydog](https://github.com/praydog)** | Downloaded on-demand (`dinput8.dll`) when enabled for Capcom RE Engine games to ensure hook compatibility and stability. | MIT License / Upstream Terms |
 | **[DLSS Swapper](https://github.com/beeradmoore/dlss-swapper)** | **[beeradmoore](https://github.com/beeradmoore)** | Visual UI/UX inspiration for the poster library grid and slide-out game inspector drawer. | GPL-3.0 *(Inspiration only; no code used)* |
 | **[AMD FidelityFX SDK / FSR](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK)** | **Advanced Micro Devices, Inc.** | Unmodified fallback FidelityFX upscaler binary (`amd_fidelityfx_upscaler_dx12.dll` v4.1.1) and Lanczos weight approximation routines. | AMD FidelityFX License & MIT |

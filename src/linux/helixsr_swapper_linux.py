@@ -280,9 +280,14 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
     best_exe_size = -1
     best_exe_name = None
     found_dlss_path = None
+    found_ffx_fg_path = None
+    found_xe_fg_path = None
+    found_xe_ll_path = None
+    has_dlss_g = False
 
     def walk_dir(curr_dir, depth):
         nonlocal best_exe_dir, best_exe_size, best_exe_name, found_dlss_path
+        nonlocal found_ffx_fg_path, found_xe_fg_path, found_xe_ll_path, has_dlss_g
         if depth > 6 or not os.path.isdir(curr_dir):
             return
         try:
@@ -310,8 +315,17 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
             if low == "nvngx_dlss.dll":
                 detected_inputs.add("DLSS")
                 found_dlss_path = full
+            elif low in ("nvngx_dlssg.dll", "sl.dlss_g.dll"):
+                detected_inputs.add("DLSS-G")
+                has_dlss_g = True
             elif low == "libxess.dll":
                 detected_inputs.add("XeSS")
+            elif low == "libxess_fg.dll":
+                found_xe_fg_path = full
+            elif low == "libxell.dll":
+                found_xe_ll_path = full
+            elif low == "amd_fidelityfx_framegeneration_dx12.dll":
+                found_ffx_fg_path = full
             elif low in ("ffx_fsr2_api_x64.dll", "ffx_fsr2_api_dx12_x64.dll"):
                 detected_inputs.add("FSR 2")
             elif low in (DLL_SR.lower(), DLL_FSR.lower()):
@@ -348,6 +362,7 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
     version = None
     opti_dll_name = "dxgi.dll"
     use_fakenvapi = True
+    fg_mode = "auto"
     has_backups = False
     has_logs = False
     has_myfsr = False
@@ -364,6 +379,8 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
                 opti_dll_name = mdata["optiscaler"]
             if "fakenvapi" in mdata:
                 use_fakenvapi = bool(mdata["fakenvapi"])
+            if mdata.get("fg_mode"):
+                fg_mode = mdata["fg_mode"]
         except Exception:
             version = "1.7.0"
 
@@ -418,8 +435,18 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
         route = None
         installed = False
 
+    fg_tag = ""
+    if route == "optiscaler" and fg_mode != "auto":
+        fg_map = {
+            "dlssg_xefg": " + XeFG",
+            "dlssg_fsrfg": " + FSR-FG",
+            "dlssg_nukems": " + NukemFG",
+            "optifg_fsrfg": " + OptiFG",
+        }
+        fg_tag = fg_map.get(fg_mode, "")
+
     route_display = (
-        f"OptiScaler ({opti_dll_name})" if route == "optiscaler" else ("Direct (FSR 3.1)" if route == "direct" else "Unsupported")
+        f"OptiScaler ({opti_dll_name}{fg_tag})" if route == "optiscaler" else ("Direct (FSR 3.1)" if route == "direct" else "Unsupported")
     )
 
     return {
@@ -434,6 +461,11 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
         "routeDisplay": route_display,
         "optiDllName": opti_dll_name,
         "useFakeNvapi": use_fakenvapi,
+        "fgMode": fg_mode,
+        "hasDlssG": has_dlss_g,
+        "foundFfxFgPath": found_ffx_fg_path,
+        "foundXeFgPath": found_xe_fg_path,
+        "foundXeLlPath": found_xe_ll_path,
         "isReEngine": is_re,
         "installReFramework": install_ref,
         "installed": installed,
@@ -800,7 +832,7 @@ def cleanup_helixsr_files(game):
                         pass
 
 
-def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenvapi=None, install_ref=None):
+def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenvapi=None, install_ref=None, fg_mode=None):
     st = get_core_status()
     if not st["weightsBuilt"]:
         raise RuntimeError(
@@ -818,6 +850,12 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
         game["useFakeNvapi"] = bool(use_fakenvapi)
     if install_ref is not None:
         game["installReFramework"] = bool(install_ref)
+    if fg_mode:
+        game["fgMode"] = fg_mode
+
+    active_fg_mode = game.get("fgMode") or "auto"
+    if active_fg_mode.startswith("dlssg_"):
+        game["useFakeNvapi"] = True
 
     cleanup_helixsr_files(game)
 
@@ -836,6 +874,7 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
         rec = {
             "optiscaler": opti_name,
             "fakenvapi": bool(game.get("useFakeNvapi", True)),
+            "fg_mode": active_fg_mode,
             "helixsr": "1.7.0",
             "route": "optiscaler",
         }
@@ -898,12 +937,74 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
         if os.path.isfile(src_amd_fsr):
             shutil.copy2(src_amd_fsr, os.path.join(helix_dir, AMD_FSR_FILE))
 
+        core_my_fsr = os.path.join(CORE_DIR, MY_FSR_FOLDER)
+        optional_fg_dlls = (
+            "libxess_fg.dll",
+            "libxell.dll",
+            "amd_fidelityfx_framegeneration_dx12.dll",
+            "dlssg_to_fsr3_amd_is_better.dll",
+        )
+        for fg_dll in optional_fg_dlls:
+            src_fg = os.path.join(core_my_fsr, fg_dll) if os.path.isfile(os.path.join(core_my_fsr, fg_dll)) else (
+                os.path.join(my_fsr_dir, fg_dll) if os.path.isfile(os.path.join(my_fsr_dir, fg_dll)) else (
+                    os.path.join(CORE_DIR, "optiscaler", fg_dll) if os.path.isfile(os.path.join(CORE_DIR, "optiscaler", fg_dll)) else None
+                )
+            )
+            if src_fg:
+                shutil.copy2(src_fg, os.path.join(helix_dir, fg_dll))
+                if fg_dll.lower() == "dlssg_to_fsr3_amd_is_better.dll":
+                    dst_nukem = os.path.join(t, fg_dll)
+                    if not os.path.isfile(dst_nukem):
+                        created_list.append(fg_dll)
+                    shutil.copy2(src_fg, dst_nukem)
+
         if os.path.isfile(game_ini):
             with open(game_ini, "r", encoding="utf-8", errors="ignore") as f:
                 txt = f.read()
             txt = set_ini_value(txt, "Dx12Upscaler", "fsr31", "Upscalers")
             txt = set_ini_value(txt, "FfxDx12Path", f"HelixSR\\{OWN_DLL}", "Libraries")
             txt = set_ini_value(txt, "FfxDx12SRPath", f"HelixSR\\{OWN_SR_DLL}", "Libraries")
+
+            ffx_fg_lib = os.path.join(helix_dir, "amd_fidelityfx_framegeneration_dx12.dll")
+            if os.path.isfile(ffx_fg_lib):
+                txt = set_ini_value(txt, "FfxDx12FGPath", "HelixSR\\amd_fidelityfx_framegeneration_dx12.dll", "Libraries")
+            elif game.get("foundFfxFgPath") and os.path.isfile(game["foundFfxFgPath"]):
+                txt = set_ini_value(txt, "FfxDx12FGPath", game["foundFfxFgPath"], "Libraries")
+
+            xe_fg_lib = os.path.join(helix_dir, "libxess_fg.dll")
+            if os.path.isfile(xe_fg_lib):
+                txt = set_ini_value(txt, "XeFGPath", "HelixSR\\libxess_fg.dll", "Libraries")
+            elif game.get("foundXeFgPath") and os.path.isfile(game["foundXeFgPath"]):
+                txt = set_ini_value(txt, "XeFGPath", game["foundXeFgPath"], "Libraries")
+
+            xe_ll_lib = os.path.join(helix_dir, "libxell.dll")
+            if os.path.isfile(xe_ll_lib):
+                txt = set_ini_value(txt, "XeLLPath", "HelixSR\\libxell.dll", "Libraries")
+            elif game.get("foundXeLlPath") and os.path.isfile(game["foundXeLlPath"]):
+                txt = set_ini_value(txt, "XeLLPath", game["foundXeLlPath"], "Libraries")
+
+            if active_fg_mode == "dlssg_xefg":
+                txt = set_ini_value(txt, "Enabled", "true", "FrameGen")
+                txt = set_ini_value(txt, "FGInput", "dlssg", "FrameGen")
+                txt = set_ini_value(txt, "FGOutput", "xefg", "FrameGen")
+            elif active_fg_mode == "dlssg_fsrfg":
+                txt = set_ini_value(txt, "Enabled", "true", "FrameGen")
+                txt = set_ini_value(txt, "FGInput", "dlssg", "FrameGen")
+                txt = set_ini_value(txt, "FGOutput", "fsrfg", "FrameGen")
+            elif active_fg_mode == "dlssg_nukems":
+                txt = set_ini_value(txt, "Enabled", "true", "FrameGen")
+                txt = set_ini_value(txt, "FGInput", "dlssg", "FrameGen")
+                txt = set_ini_value(txt, "FGOutput", "nukems", "FrameGen")
+            elif active_fg_mode == "optifg_fsrfg":
+                txt = set_ini_value(txt, "Enabled", "true", "FrameGen")
+                txt = set_ini_value(txt, "FGInput", "upscaler", "FrameGen")
+                txt = set_ini_value(txt, "FGOutput", "fsrfg", "FrameGen")
+                txt = set_ini_value(txt, "HUDFix", "true", "OptiFG")
+            else:
+                txt = set_ini_value(txt, "Enabled", "auto", "FrameGen")
+                txt = set_ini_value(txt, "FGInput", "auto", "FrameGen")
+                txt = set_ini_value(txt, "FGOutput", "nofg", "FrameGen")
+
             with open(game_ini, "w", encoding="utf-8") as f:
                 f.write(txt)
 
@@ -954,7 +1055,17 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
     elif os.path.isfile(os.path.join(t, "reframework_revision.txt")):
         uninstall_reframework(game)
 
-    method_label = f"OptiScaler ({game.get('optiDllName', 'dxgi.dll')})" if game["route"] == "optiscaler" else "Direct FSR 3.1"
+    fg_tag = ""
+    if game["route"] == "optiscaler" and active_fg_mode != "auto":
+        fg_map = {
+            "dlssg_xefg": " + XeFG",
+            "dlssg_fsrfg": " + FSR-FG",
+            "dlssg_nukems": " + NukemFG",
+            "optifg_fsrfg": " + OptiFG",
+        }
+        fg_tag = fg_map.get(active_fg_mode, "")
+
+    method_label = f"OptiScaler ({game.get('optiDllName', 'dxgi.dll')}{fg_tag})" if game["route"] == "optiscaler" else "Direct FSR 3.1"
     if game.get("installReFramework"):
         method_label += " + REFramework Nightly"
     return {"success": True, "message": f"Installed HelixSR [{method_label}] for {game['name']}!"}
@@ -1237,6 +1348,7 @@ class SwapperRequestHandler(BaseHTTPRequestHandler):
                     opti_dll=body.get("optiDllName"),
                     use_fakenvapi=body.get("useFakeNvapi"),
                     install_ref=body.get("installReFramework"),
+                    fg_mode=body.get("fgMode"),
                 )
                 return self._send_json(200, res)
 

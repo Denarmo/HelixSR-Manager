@@ -253,6 +253,7 @@ function openGameDrawerByFolder(folder) {
 
 function populateDrawerMethodOptions(game) {
   const sel = document.getElementById('drawer-install-method');
+  const fgSel = document.getElementById('drawer-fg-mode');
   const chkFake = document.getElementById('drawer-chk-fakenvapi');
   const chkRef = document.getElementById('drawer-chk-reframework');
   if (!sel) return;
@@ -286,6 +287,25 @@ function populateDrawerMethodOptions(game) {
 
   const targetVal = game.route === 'direct' ? 'direct' : `optiscaler:${game.optiDllName || 'dxgi.dll'}`;
   sel.value = targetVal;
+
+  if (fgSel) {
+    fgSel.innerHTML = '';
+    const fgOptions = [
+      ['auto', 'Frame Gen: Game Default / Pass-Through'],
+      ['dlssg_xefg', 'DLSS-G Hook → Intel XeFG (AI Neural Frame Gen on AMD)'],
+      ['dlssg_fsrfg', 'DLSS-G Hook → AMD FidelityFX FG (FSR 3.1 / 4.0 FG)'],
+      ['dlssg_nukems', "DLSS-G Hook → Nukem's dlssg-to-fsr3 (Streamline Swapchain)"],
+      ['optifg_fsrfg', 'Universal OptiFG (Upscaler Hook + HUDFix → FSR-FG)']
+    ];
+    for (const [val, label] of fgOptions) {
+      const o = document.createElement('option');
+      o.value = val;
+      o.textContent = label;
+      fgSel.appendChild(o);
+    }
+    fgSel.value = game.fgMode || 'auto';
+  }
+
   if (chkFake) chkFake.checked = game.useFakeNvapi !== false;
   if (chkRef) chkRef.checked = !!game.installReFramework;
   updateDrawerMethodSummary();
@@ -294,6 +314,8 @@ function populateDrawerMethodOptions(game) {
 function updateDrawerMethodSummary() {
   if (!currentGame) return;
   const sel = document.getElementById('drawer-install-method');
+  const fgWrap = document.getElementById('drawer-fg-wrap');
+  const fgSel = document.getElementById('drawer-fg-mode');
   const hint = document.getElementById('drawer-method-hint');
   const fakeWrap = document.getElementById('drawer-fakenvapi-wrap');
   const chkFake = document.getElementById('drawer-chk-fakenvapi');
@@ -309,14 +331,26 @@ function updateDrawerMethodSummary() {
     currentGame.route = 'optiscaler';
     currentGame.optiDllName = val.substring('optiscaler:'.length);
   }
+  currentGame.fgMode = fgSel ? fgSel.value : 'auto';
+  if (currentGame.fgMode.startsWith('dlssg_') && chkFake) {
+    chkFake.checked = true;
+  }
   currentGame.useFakeNvapi = chkFake ? chkFake.checked : true;
   currentGame.installReFramework = chkRef ? chkRef.checked : false;
 
   const isOpti = currentGame.route === 'optiscaler';
   const optiDll = currentGame.optiDllName || 'dxgi.dll';
+  if (fgWrap) fgWrap.style.display = isOpti ? 'block' : 'none';
   if (fakeWrap) fakeWrap.style.display = isOpti ? 'flex' : 'none';
 
-  drawerRouteBadge.textContent = isOpti ? `OptiScaler (${optiDll})` : 'Direct (FSR 3.1)';
+  const fgMap = {
+    dlssg_xefg: ' + XeFG',
+    dlssg_fsrfg: ' + FSR-FG',
+    dlssg_nukems: ' + NukemFG',
+    optifg_fsrfg: ' + OptiFG'
+  };
+  const fgTag = isOpti ? (fgMap[currentGame.fgMode] || '') : '';
+  drawerRouteBadge.textContent = isOpti ? `OptiScaler (${optiDll}${fgTag})` : 'Direct (FSR 3.1)';
   if (currentGame.installReFramework) drawerRouteBadge.textContent += ' + REFramework';
 
   // Compute Proton Launch Options
@@ -331,17 +365,23 @@ function updateDrawerMethodSummary() {
   }
 
   if (isOpti) {
-    if (hint) hint.textContent = `Injects OptiScaler via ${optiDll} and routes DLSS/XeSS/FSR 2 inputs to HelixSR. Press Insert in-game to open the OptiScaler menu.`;
+    let fgNote = '';
+    if (currentGame.fgMode === 'dlssg_xefg') fgNote = ' Routes in-game DLSS Frame Generation to Intel XeSS-FG (AI optical flow on AMD/Intel).';
+    else if (currentGame.fgMode === 'dlssg_fsrfg') fgNote = ' Routes in-game DLSS Frame Generation to AMD FidelityFX Frame Generation.';
+    else if (currentGame.fgMode === 'dlssg_nukems') fgNote = " Routes in-game DLSS Frame Generation via Nukem's dlssg-to-fsr3 swapchain.";
+    else if (currentGame.fgMode === 'optifg_fsrfg') fgNote = ' Enables Universal OptiFG + HUDFix using upscaler motion vectors & depth.';
+
+    if (hint) hint.textContent = `Injects OptiScaler via ${optiDll} and routes DLSS/XeSS/FSR 2 inputs to HelixSR.${fgNote} Press Insert in-game to open the OptiScaler menu.`;
     drawerValMethod.textContent = currentGame.installReFramework
-      ? `OptiScaler (${optiDll}) + REFramework Nightly (dinput8.dll)`
-      : `OptiScaler Injection (${optiDll} — Select DLSS in game)`;
+      ? `OptiScaler (${optiDll}${fgTag}) + REFramework Nightly (dinput8.dll)`
+      : `OptiScaler Injection (${optiDll}${fgTag} — Select DLSS in game)`;
     if (instructionsBox) {
       instructionsBox.innerHTML = `
         <ol>
-          <li>Choose your OptiScaler hook (<code>${optiDll}</code>) and click <strong>Install HelixSR</strong>.</li>
+          <li>Choose your OptiScaler hook (<code>${optiDll}</code>) and Frame Generation mode, then click <strong>Install HelixSR</strong>.</li>
           <li>On SteamOS / Linux, paste the <strong>Proton Launch Option</strong> above into Steam game properties if needed.</li>
-          <li>Launch the game and select <strong>NVIDIA DLSS</strong> in Graphics settings.</li>
-          <li>Press <kbd>Insert</kbd> in-game to open OptiScaler's HUD and customize HelixSR.</li>
+          <li>Launch the game and select <strong>NVIDIA DLSS</strong> (and enable DLSS Frame Generation if using a DLSS-G hook) in Graphics settings.</li>
+          <li>Press <kbd>Insert</kbd> in-game to open OptiScaler's HUD and customize HelixSR &amp; Frame Generation.</li>
         </ol>
       `;
     }
@@ -366,6 +406,7 @@ function updateDrawerMethodSummary() {
 }
 
 document.getElementById('drawer-install-method')?.addEventListener('change', updateDrawerMethodSummary);
+document.getElementById('drawer-fg-mode')?.addEventListener('change', updateDrawerMethodSummary);
 document.getElementById('drawer-chk-fakenvapi')?.addEventListener('change', updateDrawerMethodSummary);
 document.getElementById('drawer-chk-reframework')?.addEventListener('change', updateDrawerMethodSummary);
 document.getElementById('drawer-btn-copy-proton')?.addEventListener('click', () => {
@@ -446,6 +487,7 @@ drawerBtnInstall.addEventListener('click', async () => {
         gameFolder: currentGame.folder,
         route: currentGame.route,
         optiDllName: currentGame.optiDllName,
+        fgMode: currentGame.fgMode,
         useFakeNvapi: currentGame.useFakeNvapi,
         installReFramework: currentGame.installReFramework
       })

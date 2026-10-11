@@ -19,6 +19,11 @@ namespace HelixSRSwapper
         public List<string> Inputs { get; set; }
         public List<string> FsrTargets { get; set; }
         public string FoundNvngxDlssPath { get; set; }
+        public string FoundFfxFgPath { get; set; }
+        public string FoundXeFgPath { get; set; }
+        public string FoundXeLlPath { get; set; }
+        public bool HasDlssG { get; set; }
+        public string FgMode { get; set; } // "auto", "dlssg_xefg", "dlssg_fsrfg", "dlssg_nukems", "optifg_fsrfg"
         public string Route { get; set; } // "optiscaler" or "direct"
         public string OptiDllName { get; set; } // "dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll", "d3d12.dll", "wininet.dll", "winhttp.dll", "OptiScaler.asi"
         public bool UseFakeNvapi { get; set; }
@@ -30,7 +35,18 @@ namespace HelixSRSwapper
             get
             {
                 if (Route == "direct") return "Direct FSR 3.1";
-                if (Route == "optiscaler") return string.Format("OptiScaler ({0})", string.IsNullOrEmpty(OptiDllName) ? "dxgi.dll" : OptiDllName);
+                if (Route == "optiscaler")
+                {
+                    string baseStr = string.Format("OptiScaler ({0})", string.IsNullOrEmpty(OptiDllName) ? "dxgi.dll" : OptiDllName);
+                    if (!string.IsNullOrEmpty(FgMode) && FgMode != "auto")
+                    {
+                        if (FgMode == "dlssg_xefg") baseStr += " + XeFG";
+                        else if (FgMode == "dlssg_fsrfg") baseStr += " + FSR-FG";
+                        else if (FgMode == "dlssg_nukems") baseStr += " + NukemFG";
+                        else if (FgMode == "optifg_fsrfg") baseStr += " + OptiFG";
+                    }
+                    return baseStr;
+                }
                 return "Auto";
             }
         }
@@ -54,6 +70,7 @@ namespace HelixSRSwapper
             Version = "1.7.0";
             OptiDllName = "dxgi.dll";
             UseFakeNvapi = true;
+            FgMode = "auto";
         }
     }
 

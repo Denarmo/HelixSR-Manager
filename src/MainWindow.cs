@@ -103,6 +103,8 @@ namespace HelixSRSwapper
         private TextBlock _txtDrawerStatus;
         private ComboBox _cmbDrawerInstallMethod;
         private TextBlock _txtDrawerMethodHint;
+        private StackPanel _panelDrawerFg;
+        private ComboBox _cmbDrawerFgMode;
         private System.Windows.Controls.CheckBox _chkDrawerFakeNvapi;
         private System.Windows.Controls.CheckBox _chkDrawerReFramework;
         private bool _updatingDrawerControls = false;
@@ -1792,9 +1794,27 @@ namespace HelixSRSwapper
             };
             mStack.Children.Add(_txtDrawerMethodHint);
 
+            _panelDrawerFg = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+            _panelDrawerFg.Children.Add(new TextBlock
+            {
+                Text = "FRAME GENERATION (DLSS-G HOOK / OPTIFG)",
+                FontSize = 10,
+                FontWeight = FontWeights.Bold,
+                Foreground = AccentEmerald,
+                Margin = new Thickness(0, 0, 0, 5)
+            });
+            _cmbDrawerFgMode = new ComboBox
+            {
+                Height = 33,
+                FontSize = 11.5
+            };
+            _cmbDrawerFgMode.SelectionChanged += delegate { OnDrawerFgSelectionChanged(); };
+            _panelDrawerFg.Children.Add(_cmbDrawerFgMode);
+            mStack.Children.Add(_panelDrawerFg);
+
             _chkDrawerFakeNvapi = new System.Windows.Controls.CheckBox
             {
-                Content = "Deploy FakeNVAPI (fakenvapi.dll) to unlock DLSS on AMD/Intel GPUs",
+                Content = "Deploy FakeNVAPI (fakenvapi.dll) to unlock DLSS & DLSS-G on AMD/Intel GPUs",
                 Foreground = TextMain,
                 FontSize = 11.5,
                 IsChecked = true,
@@ -2099,6 +2119,33 @@ namespace HelixSRSwapper
                 }
                 _cmbDrawerInstallMethod.SelectedIndex = selectedIdx;
 
+                _cmbDrawerFgMode.Items.Clear();
+                string[][] fgOptions = new string[][]
+                {
+                    new string[] { "auto", "Frame Gen: Game Default / Pass-Through" },
+                    new string[] { "dlssg_xefg", "DLSS-G Hook → Intel XeFG (AI Neural Frame Gen on AMD)" },
+                    new string[] { "dlssg_fsrfg", "DLSS-G Hook → AMD FidelityFX FG (FSR 3.1 / 4.0 FG)" },
+                    new string[] { "dlssg_nukems", "DLSS-G Hook → Nukem's dlssg-to-fsr3 (Streamline Swapchain)" },
+                    new string[] { "optifg_fsrfg", "Universal OptiFG (Upscaler Hook + HUDFix → FSR-FG)" }
+                };
+                foreach (var fgOpt in fgOptions)
+                {
+                    _cmbDrawerFgMode.Items.Add(new ComboBoxItem { Content = fgOpt[1], Tag = fgOpt[0] });
+                }
+
+                string targetFg = string.IsNullOrEmpty(game.FgMode) ? "auto" : game.FgMode;
+                int fgIdx = 0;
+                for (int i = 0; i < _cmbDrawerFgMode.Items.Count; i++)
+                {
+                    var fcbi = _cmbDrawerFgMode.Items[i] as ComboBoxItem;
+                    if (fcbi != null && string.Equals(fcbi.Tag as string, targetFg, StringComparison.OrdinalIgnoreCase))
+                    {
+                        fgIdx = i;
+                        break;
+                    }
+                }
+                _cmbDrawerFgMode.SelectedIndex = fgIdx;
+
                 _chkDrawerFakeNvapi.IsChecked = game.UseFakeNvapi;
                 _chkDrawerReFramework.IsChecked = game.InstallReFramework;
             }
@@ -2130,31 +2177,56 @@ namespace HelixSRSwapper
             UpdateDrawerMethodSummary();
         }
 
+        private void OnDrawerFgSelectionChanged()
+        {
+            if (_updatingDrawerControls || _selectedGame == null) return;
+            var cbi = _cmbDrawerFgMode.SelectedItem as ComboBoxItem;
+            if (cbi == null || cbi.Tag == null) return;
+
+            string fgTag = cbi.Tag.ToString();
+            _selectedGame.FgMode = fgTag;
+            if (fgTag.StartsWith("dlssg_"))
+            {
+                _selectedGame.UseFakeNvapi = true;
+                _updatingDrawerControls = true;
+                _chkDrawerFakeNvapi.IsChecked = true;
+                _updatingDrawerControls = false;
+            }
+            UpdateDrawerMethodSummary();
+        }
+
         private void UpdateDrawerMethodSummary()
         {
             if (_selectedGame == null) return;
 
             bool isOpti = _selectedGame.Route == "optiscaler";
             string optiDll = string.IsNullOrEmpty(_selectedGame.OptiDllName) ? "dxgi.dll" : _selectedGame.OptiDllName;
+            string fgMode = string.IsNullOrEmpty(_selectedGame.FgMode) ? "auto" : _selectedGame.FgMode;
 
+            if (_panelDrawerFg != null)
+                _panelDrawerFg.Visibility = isOpti ? Visibility.Visible : Visibility.Collapsed;
             _chkDrawerFakeNvapi.Visibility = isOpti ? Visibility.Visible : Visibility.Collapsed;
 
-            _txtDrawerRoute.Text = isOpti
-                ? string.Format("OptiScaler ({0})", optiDll)
-                : "Direct (FSR Replacement)";
+            _txtDrawerRoute.Text = _selectedGame.RouteDisplay;
             if (_selectedGame.InstallReFramework) _txtDrawerRoute.Text += " + REFramework";
 
             if (isOpti)
             {
-                _txtDrawerMethodHint.Text = string.Format("Injects OptiScaler via {0} and routes DLSS/XeSS/FSR 2 inputs to HelixSR. Press Insert in-game to open the OptiScaler menu.", optiDll);
+                string fgNote = "";
+                if (fgMode == "dlssg_xefg") fgNote = " Routes in-game DLSS Frame Generation to Intel XeSS-FG (AI optical flow on AMD/Intel).";
+                else if (fgMode == "dlssg_fsrfg") fgNote = " Routes in-game DLSS Frame Generation to AMD FidelityFX Frame Generation.";
+                else if (fgMode == "dlssg_nukems") fgNote = " Routes in-game DLSS Frame Generation via Nukem's dlssg-to-fsr3 swapchain.";
+                else if (fgMode == "optifg_fsrfg") fgNote = " Enables Universal OptiFG + HUDFix using upscaler motion vectors & depth.";
+
+                _txtDrawerMethodHint.Text = string.Format("Injects OptiScaler via {0} and routes DLSS/XeSS/FSR 2 inputs to HelixSR.{1} Press Insert in-game to open the OptiScaler menu.", optiDll, fgNote);
                 _txtDrawerMethod.Text = _selectedGame.InstallReFramework
-                    ? string.Format("OptiScaler ({0}) + REFramework Nightly (dinput8.dll)", optiDll)
-                    : string.Format("OptiScaler Injection ({0} — Select DLSS in game)", optiDll);
+                    ? string.Format("{0} + REFramework Nightly (dinput8.dll)", _selectedGame.RouteDisplay)
+                    : string.Format("{0} (Select DLSS in game)", _selectedGame.RouteDisplay);
                 _txtDrawerGuide.Text = string.Format(
-                    "1. Choose your preferred OptiScaler hook ({0}) and click '{1}'.\n" +
+                    "1. Choose your preferred OptiScaler hook ({0}) and Frame Generation mode, then click '{1}'.\n" +
                     "2. Start the game and open Graphics / Display settings.\n" +
-                    "3. Select NVIDIA DLSS (or XeSS / FSR 2) as your upscaler.\n" +
-                    "4. Press the Insert key in-game to open OptiScaler's HUD and customize HelixSR.",
+                    "3. Select NVIDIA DLSS as your upscaler (and enable DLSS Frame Generation if using a DLSS-G hook).\n" +
+                    "4. Press the Insert key in-game to open OptiScaler's HUD and customize HelixSR & Frame Generation.",
                     optiDll, _selectedGame.Installed ? "Update / Reinstall" : "Install HelixSR");
             }
             else
@@ -2505,10 +2577,10 @@ namespace HelixSRSwapper
             var grid = new Grid { Margin = new Thickness(24) };
             var stack = new StackPanel { MaxWidth = 880, HorizontalAlignment = HorizontalAlignment.Left };
 
-            stack.Children.Add(new TextBlock { Text = "Custom FSR & FidelityFX Manager (my-fsr)", FontSize = 21, FontWeight = FontWeights.Bold, Foreground = TextMain, Margin = new Thickness(0, 0, 0, 6) });
+            stack.Children.Add(new TextBlock { Text = "Custom FSR & Frame Generation Manager (my-fsr)", FontSize = 21, FontWeight = FontWeights.Bold, Foreground = TextMain, Margin = new Thickness(0, 0, 0, 6) });
             stack.Children.Add(new TextBlock
             {
-                Text = "OptiScaler allows dropping any custom AMD FidelityFX DLL (such as FSR 4.1.1) into the game's 'HelixSR/my-fsr' folder to expose it in-game side-by-side with HelixSR!",
+                Text = "OptiScaler allows dropping custom AMD FidelityFX and Intel XeSS Frame Generation DLLs into 'my-fsr' to expose them in-game alongside HelixSR!",
                 FontSize = 13,
                 Foreground = TextMuted,
                 Margin = new Thickness(0, 0, 0, 20)
@@ -2525,7 +2597,15 @@ namespace HelixSRSwapper
             var cStack = new StackPanel();
             cStack.Children.Add(new TextBlock
             {
-                Text = "How to use custom FSR in your games:\n\n1. In games installed with HelixSR, open the 'my-fsr' folder from the Game Drawer.\n2. Copy your custom FSR DLL (e.g. amd_fidelityfx_upscaler_dx12.dll for FSR 4) into that folder.\n3. Launch the game and press the Insert key to open OptiScaler's HUD.\n4. Navigate to Upscaling > Upscalers > FFX Upscaler, and pick your custom FSR version!\n5. Switch back to HelixSR (3.1.5) in real time for instant A/B comparisons.",
+                Text = "How to use custom FSR & Frame Generation DLLs in your games:\n\n" +
+                       "1. Click 'Open Core my-fsr Folder' below (or open a game's 'my-fsr' folder from the Game Drawer).\n" +
+                       "2. Drop any of these optional DLLs into the folder:\n" +
+                       "   • amd_fidelityfx_upscaler_dx12.dll — Custom FSR 3.1 / FSR 4 upscaler for real-time A/B comparisons\n" +
+                       "   • libxess_fg.dll & libxell.dll — Intel XeSS Frame Generation & XeLL Low Latency (for DLSS-G → XeFG)\n" +
+                       "   • amd_fidelityfx_framegeneration_dx12.dll — AMD FidelityFX Frame Generation (for DLSS-G → FSR-FG / OptiFG)\n" +
+                       "   • dlssg_to_fsr3_amd_is_better.dll — Nukem's DLSS-G to FSR 3.1 Streamline swapchain translator\n" +
+                       "3. Select your desired Frame Generation mode in the Game Drawer and install HelixSR.\n" +
+                       "4. Launch the game and press the Insert key to open OptiScaler's HUD to switch upscalers or tune Frame Gen!",
                 FontSize = 13,
                 Foreground = TextMain,
                 TextWrapping = TextWrapping.Wrap,
@@ -2625,7 +2705,7 @@ namespace HelixSRSwapper
 
             cStack.Children.Add(new TextBlock
             {
-                Text = "\nAbout HelixSR Manager:\nHelixSR runs NVIDIA's DLSS Model E neural network using pure Direct3D 12 compute shaders on AMD RDNA GPUs without Tensor Cores or NVIDIA drivers.\n\nHelixSR Manager is a 100% standalone native desktop application supporting Direct FSR 3.1 replacement, OptiScaler proxy hooks, FakeNVAPI, and automatic Capcom REFramework nightly deployment.",
+                Text = "\nAbout HelixSR Manager:\nHelixSR runs NVIDIA's DLSS Model E neural network using pure Direct3D 12 compute shaders on AMD RDNA GPUs without Tensor Cores or NVIDIA drivers.\n\nHelixSR Manager is a 100% standalone native desktop application supporting Direct FSR 3.1 replacement, OptiScaler proxy hooks, DLSS-G Frame Generation translation (XeFG / FSR-FG / NukemFG / OptiFG), FakeNVAPI, and automatic Capcom REFramework nightly deployment.",
                 FontSize = 12.5,
                 Foreground = TextMuted,
                 TextWrapping = TextWrapping.Wrap,
@@ -2832,14 +2912,20 @@ namespace HelixSRSwapper
 
             foreach (var inp in game.Inputs)
             {
+                Brush badgeBg = AccentViolet;
+                Brush badgeFg = Brushes.White;
+                if (inp == "DLSS") { badgeBg = AccentEmeraldStrong; badgeFg = TextOnAccent; }
+                else if (inp == "DLSS-G") { badgeBg = AccentAmber; badgeFg = TextOnAccent; }
+                else if (inp == "XeSS") { badgeBg = AccentSky; badgeFg = Brushes.White; }
+
                 var b = new Border
                 {
-                    Background = inp == "DLSS" ? AccentEmeraldStrong : (inp == "XeSS" ? AccentSky : AccentViolet),
+                    Background = badgeBg,
                     CornerRadius = new CornerRadius(6),
                     Padding = new Thickness(6, 2, 6, 2),
                     Margin = new Thickness(0, 0, 4, 4)
                 };
-                b.Child = new TextBlock { Text = inp, FontSize = 9.5, FontWeight = FontWeights.Bold, Foreground = inp == "DLSS" ? TextOnAccent : Brushes.White };
+                b.Child = new TextBlock { Text = inp, FontSize = 9.5, FontWeight = FontWeights.Bold, Foreground = badgeFg };
                 topPanel.Children.Add(b);
             }
 

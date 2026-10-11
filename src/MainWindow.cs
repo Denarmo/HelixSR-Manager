@@ -489,21 +489,6 @@ namespace HelixSRSwapper
             {
                 if (!proc.HasExited)
                 {
-                    try
-                    {
-                        using (var tk = Process.Start(new ProcessStartInfo
-                        {
-                            FileName = "taskkill.exe",
-                            Arguments = string.Format("/F /T /PID {0}", proc.Id),
-                            CreateNoWindow = true,
-                            UseShellExecute = false,
-                            WorkingDirectory = Path.GetTempPath()
-                        }))
-                        {
-                            if (tk != null) tk.WaitForExit(2000);
-                        }
-                    }
-                    catch { }
                     try { if (!proc.HasExited) proc.Kill(); } catch { }
                 }
             }

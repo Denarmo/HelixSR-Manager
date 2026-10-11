@@ -1,0 +1,13 @@
+{
+  "name": "helixsr-manager",
+  "version": "1.0.0",
+  "description": "HelixSR Manager",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "jest": "^30.0.0",
+    "jest-environment-jsdom": "^30.0.0"
+  }
+}

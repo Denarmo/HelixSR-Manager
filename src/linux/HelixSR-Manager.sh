@@ -4,9 +4,9 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
-if [ -f "$HERE/helixsr_core/HelixSR-1.7.0/helixsr-setup.sh" ]; then
-    chmod +x "$HERE/helixsr_core/HelixSR-1.7.0/helixsr-setup.sh" 2>/dev/null || true
-fi
+for f in "$HERE"/helixsr_core/HelixSR-1.8.1/*.sh; do
+    [ -f "$f" ] && chmod +x "$f" 2>/dev/null || true
+done
 
 PY=""
 if command -v python3 >/dev/null 2>&1; then

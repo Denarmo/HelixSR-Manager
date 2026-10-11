@@ -1164,6 +1164,16 @@ namespace HelixSRSwapper
 
             int count = 0;
             var allGames = ScanAllGames(null);
+
+            var validNetworkFiles = new List<KeyValuePair<string, string>>();
+            foreach (var net in NetworkFiles)
+            {
+                string src = Path.Combine(CoreDir, net);
+                if (File.Exists(src))
+                {
+                    validNetworkFiles.Add(new KeyValuePair<string, string>(src, net));
+                }
+            }
             foreach (var g in allGames)
             {
                 if (g.Installed && !string.IsNullOrEmpty(g.ExeFolder))
@@ -1171,23 +1181,18 @@ namespace HelixSRSwapper
                     string helixDir = Path.Combine(g.ExeFolder, HelixSrFolder);
                     if (Directory.Exists(helixDir))
                     {
-                        foreach (var net in NetworkFiles)
+                        foreach (var kvp in validNetworkFiles)
                         {
-                            string src = Path.Combine(CoreDir, net);
-                            if (File.Exists(src))
-                            {
-                                File.Copy(src, Path.Combine(helixDir, net), true);
-                            }
+                            File.Copy(kvp.Key, Path.Combine(helixDir, kvp.Value), true);
                         }
 
                         // Also update _storage_ if Capcom RE Engine
                         string subStorage = Path.Combine(g.ExeFolder, "_storage_", HelixSrFolder);
                         if (Directory.Exists(subStorage))
                         {
-                            foreach (var net in NetworkFiles)
+                            foreach (var kvp in validNetworkFiles)
                             {
-                                string src = Path.Combine(CoreDir, net);
-                                if (File.Exists(src)) File.Copy(src, Path.Combine(subStorage, net), true);
+                                File.Copy(kvp.Key, Path.Combine(subStorage, kvp.Value), true);
                             }
                         }
 
@@ -1202,14 +1207,10 @@ namespace HelixSRSwapper
                         string targetDir = Path.GetDirectoryName(target);
                         if (Directory.Exists(targetDir))
                         {
-                            foreach (var net in NetworkFiles)
+                            foreach (var kvp in validNetworkFiles)
                             {
-                                string src = Path.Combine(CoreDir, net);
-                                if (File.Exists(src))
-                                {
-                                    File.Copy(src, Path.Combine(targetDir, net), true);
-                                    directUpdated = true;
-                                }
+                                File.Copy(kvp.Key, Path.Combine(targetDir, kvp.Value), true);
+                                directUpdated = true;
                             }
                         }
                     }

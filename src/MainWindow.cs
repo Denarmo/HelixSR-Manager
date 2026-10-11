@@ -1651,7 +1651,28 @@ namespace HelixSRSwapper
 
             var dock = new DockPanel();
 
-            // Top Hero Image / Banner
+            dock.Children.Add(BuildDrawerHero());
+
+            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            var contentStack = new StackPanel { Margin = new Thickness(18, 14, 18, 18) };
+
+            contentStack.Children.Add(BuildDrawerMethodBox());
+            contentStack.Children.Add(BuildDrawerActionsBar());
+            contentStack.Children.Add(BuildDrawerShortcuts());
+            contentStack.Children.Add(BuildDrawerTelemetry());
+
+            BuildDrawerTabs(contentStack);
+
+            scroll.Content = contentStack;
+            dock.Children.Add(scroll);
+
+            drawer.Children.Add(borderLeft);
+            drawer.Children.Add(dock);
+            return drawer;
+        }
+
+        private Border BuildDrawerHero()
+        {
             _bannerDrawerHero = new Border
             {
                 Height = 172,
@@ -1759,13 +1780,11 @@ namespace HelixSRSwapper
             heroGrid.Children.Add(closeBtn);
             heroGrid.Children.Add(heroOverlay);
             _bannerDrawerHero.Child = heroGrid;
-            dock.Children.Add(_bannerDrawerHero);
+            return _bannerDrawerHero;
+        }
 
-            // Scrollable Content
-            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            var contentStack = new StackPanel { Margin = new Thickness(18, 14, 18, 18) };
-
-            // Installation Method Selection Box
+        private Border BuildDrawerMethodBox()
+        {
             var methodBox = new Border
             {
                 Background = BgCard,
@@ -1849,9 +1868,11 @@ namespace HelixSRSwapper
             mStack.Children.Add(_chkDrawerReFramework);
 
             methodBox.Child = mStack;
-            contentStack.Children.Add(methodBox);
+            return methodBox;
+        }
 
-            // Primary Actions Bar
+        private UniformGrid BuildDrawerActionsBar()
+        {
             var actionsBar = new UniformGrid { Columns = 3, Margin = new Thickness(0, 0, 0, 12) };
             _btnDrawerInstall = CreateButton("⚡ Install HelixSR", AccentEmeraldStrong, TextOnAccent, delegate { OnInstallClicked(); });
             _btnDrawerInstall.Margin = new Thickness(0, 0, 5, 0);
@@ -1863,9 +1884,11 @@ namespace HelixSRSwapper
             actionsBar.Children.Add(_btnDrawerInstall);
             actionsBar.Children.Add(_btnDrawerUninstall);
             actionsBar.Children.Add(btnLaunch);
-            contentStack.Children.Add(actionsBar);
+            return actionsBar;
+        }
 
-            // Folder Shortcuts & Maintenance
+        private UniformGrid BuildDrawerShortcuts()
+        {
             var shortcuts = new UniformGrid { Columns = 4, Margin = new Thickness(0, 0, 0, 14) };
             var btnFolder = CreateButton("📁 Folder", BgCard, TextMain, delegate { if (_selectedGame != null) OpenFolderInExplorer(_selectedGame.ExeFolder ?? _selectedGame.Folder); });
             btnFolder.Margin = new Thickness(0, 0, 4, 0);
@@ -1880,9 +1903,11 @@ namespace HelixSRSwapper
             shortcuts.Children.Add(btnBackup);
             shortcuts.Children.Add(btnMyFsr);
             shortcuts.Children.Add(btnPurgeCache);
-            contentStack.Children.Add(shortcuts);
+            return shortcuts;
+        }
 
-            // Target Game Telemetry Card
+        private Border BuildDrawerTelemetry()
+        {
             var propBox = new Border
             {
                 Background = BgCard,
@@ -1898,9 +1923,11 @@ namespace HelixSRSwapper
             _txtDrawerInputs = AddPropRow(pStack, "Detected APIs:", "-");
             _txtDrawerMethod = AddPropRow(pStack, "Active Route:", "-");
             propBox.Child = pStack;
-            contentStack.Children.Add(propBox);
+            return propBox;
+        }
 
-            // Segmented Pill Tab Bar (Replacing legacy system TabControl)
+        private void BuildDrawerTabs(StackPanel contentStack)
+        {
             var segBar = new Border
             {
                 Background = BgSurface2,
@@ -2037,13 +2064,6 @@ namespace HelixSRSwapper
             contentStack.Children.Add(_drawerTabLogsPane);
 
             SwitchDrawerTab(_currentDrawerTab);
-
-            scroll.Content = contentStack;
-            dock.Children.Add(scroll);
-
-            drawer.Children.Add(borderLeft);
-            drawer.Children.Add(dock);
-            return drawer;
         }
 
         private void SwitchDrawerTab(string tab)

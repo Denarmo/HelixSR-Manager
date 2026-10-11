@@ -29,6 +29,7 @@ namespace HelixSRSwapper
         }
         private const string DllFsr = "amd_fidelityfx_dx12.dll";
         private const string DllSr = "amd_fidelityfx_upscaler_dx12.dll";
+        private static readonly string[] DllFiles = new string[] { DllSr, DllFsr };
         private const string OwnDll = "helixsr.dll";
         private const string OwnSrDll = "helixsr_upscaler.dll";
         private static readonly string[] NetworkFiles = new string[] { "helixsr_weights.bin", "helixsr_kernels.pak" };
@@ -885,7 +886,7 @@ namespace HelixSRSwapper
                 {
                     // Standalone direct DLL drop into executable directory
                     var createdDlls = new List<string>();
-                    foreach (var dllName in new string[] { DllSr, DllFsr })
+                    foreach (var dllName in DllFiles)
                     {
                         string dst = Path.Combine(t, dllName);
                         string orig = Path.ChangeExtension(dst, ".original.dll");
@@ -1079,7 +1080,7 @@ namespace HelixSRSwapper
                     }
                     catch { }
 
-                    foreach (var dllName in new string[] { DllSr, DllFsr })
+                    foreach (var dllName in DllFiles)
                     {
                         string dst = Path.Combine(exeDir, dllName);
                         string orig = Path.ChangeExtension(dst, ".original.dll");

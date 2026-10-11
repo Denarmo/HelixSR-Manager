@@ -3338,7 +3338,8 @@ namespace HelixSRSwapper
             _txtCompileConsole.Text = "Starting HelixSR Network compiler...\n";
 
             string ps1 = Path.Combine(Engine.CoreDir, "helixsr-setup.ps1");
-            var args = new List<string> { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", string.Format("\"{0}\"", ps1), "-Yes", "-Rebuild", "-BuildOnly" };
+            var psScript = new System.Text.StringBuilder();
+            psScript.Append("& '").Append(ps1.Replace("'", "''")).Append("' -Yes -Rebuild -BuildOnly");
 
             if (_cmbDlssSource.SelectedIndex > 0)
             {
@@ -3348,20 +3349,21 @@ namespace HelixSRSwapper
                 if (idx != -1 && endIdx != -1)
                 {
                     string dlss = sel.Substring(idx + 1, endIdx - idx - 1);
-                    args.Add("-Dlss");
-                    args.Add(string.Format("\"{0}\"", dlss));
+                    psScript.Append(" -Dlss '").Append(dlss.Replace("'", "''")).Append("'");
                 }
             }
 
             if (_chkWave64.IsChecked == true)
             {
-                args.Add("-Wave64");
+                psScript.Append(" -Wave64");
             }
+
+            string encodedCommand = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(psScript.ToString()));
 
             var startInfo = new ProcessStartInfo
             {
                 FileName = "powershell.exe",
-                Arguments = string.Join(" ", args.ToArray()),
+                Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encodedCommand,
                 WorkingDirectory = Path.GetTempPath(),
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,

@@ -79,7 +79,7 @@
           <span class="gpu-indicator"></span>
           <span class="gpu-name" id="sidebar-gpu-text">Detecting GPU...</span>
         </div>
-        <div class="version-tag">HelixSR Core v1.7.0</div>
+        <div class="version-tag" id="app-version-tag">Manager v1.9.0 · Core v1.8.1</div>
       </div>
     </aside>
 
@@ -244,16 +244,16 @@
                 <div class="status-row">
                   <div class="status-label">
                     <span class="dot" id="dot-weights"></span>
-                    <strong>helixsr_weights.bin</strong>
-                    <span class="sub">(FP32 tensors extracted from DLSS)</span>
+                    <strong>Network weights</strong>
+                    <span class="sub">(FP32 tensors extracted from DLSS, embedded in amd_fidelityfx_dx12.dll)</span>
                   </div>
                   <div class="status-val" id="val-weights-size">-</div>
                 </div>
                 <div class="status-row">
                   <div class="status-label">
                     <span class="dot" id="dot-kernels"></span>
-                    <strong>helixsr_kernels.pak</strong>
-                    <span class="sub">(DXIL compute shaders)</span>
+                    <strong>Shader kernels</strong>
+                    <span class="sub">(DXIL compute shaders, embedded in the same DLL)</span>
                   </div>
                   <div class="status-val" id="val-kernels-size">-</div>
                 </div>
@@ -288,10 +288,10 @@
 
               <div class="form-group checkbox-group">
                 <label class="checkbox-label">
-                  <input type="checkbox" id="check-wave64">
-                  <span>Compile Wave64 shaders (--wave64)</span>
+                  <input type="checkbox" id="check-wave64" checked disabled>
+                  <span>Wave32 + Wave64 shaders (always built since HelixSR 1.8.0)</span>
                 </label>
-                <p class="checkbox-hint">Enables extra 64-lane waves for AMD RDNA 3 and newer GPUs (Radeon RX 7000 series / BC-250 / APUs).</p>
+                <p class="checkbox-hint">Both wave sizes are compiled into the DLL; HelixSR picks the right one for your GPU (RDNA 1-4, BC-250, APUs).</p>
               </div>
 
               <div class="builder-actions">

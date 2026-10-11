@@ -1,11 +1,7 @@
 {
-  "name": "app",
-  "version": "1.0.0",
-  "description": "[![Release](https://img.shields.io/badge/Release-v1.8.1-F1C40F?style=for-the-badge)](https://github.com/Denarmo/HelixSR-Manager/releases) [![HelixSR Core](https://img.shields.io/badge/HelixSR_Core-v1.7.0-39D5FF?style=for-the-badge)](https://github.com/lonewolf0622/HelixSR) [![Platform](https://img.shields.io/badge/Platform-Windows_10%2F11_%7C_Linux_%26_SteamOS-10B981?style=for-the-badge)](#%EF%B8%8F-installation--quick-start) [![Dependencies](https://img.shields.io/badge/Dependencies-Zero_(100%25_Standalone)-8B5CF6?style=for-the-badge)](#%EF%B8%8F-installation--quick-start) [![License](https://img.shields.io/badge/License-MIT_%2B_Third--Party-F59E0B?style=for-the-badge)](#%EF%B8%8F-legal-disclaimers-licensing--third-party-notices)",
-  "main": "index.js",
-  "directories": {
-    "test": "tests"
-  },
+  "name": "helixsr-manager",
+  "version": "2.0.0",
+  "description": "HelixSR Manager",
   "scripts": {
     "test": "jest"
   },
@@ -13,16 +9,8 @@
     "type": "git",
     "url": "git+https://github.com/Denarmo/HelixSR-Manager.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/Denarmo/HelixSR-Manager/issues"
-  },
-  "homepage": "https://github.com/Denarmo/HelixSR-Manager#readme",
   "devDependencies": {
-    "jest": "^30.5.2",
-    "jsdom": "^22.1.0"
+    "jest": "^30.0.0",
+    "jest-environment-jsdom": "^30.0.0"
   }
 }

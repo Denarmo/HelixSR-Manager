@@ -1,7 +1,7 @@
 # ⚡ HelixSR Manager
 
-[![Release](https://img.shields.io/badge/Release-v1.8.1-F1C40F?style=for-the-badge)](https://github.com/Denarmo/HelixSR-Manager/releases)
-[![HelixSR Core](https://img.shields.io/badge/HelixSR_Core-v1.7.0-39D5FF?style=for-the-badge)](https://github.com/lonewolf0622/HelixSR)
+[![Release](https://img.shields.io/badge/Release-v1.9.0-F1C40F?style=for-the-badge)](https://github.com/Denarmo/HelixSR-Manager/releases)
+[![HelixSR Core](https://img.shields.io/badge/HelixSR_Core-v1.8.1-39D5FF?style=for-the-badge)](https://github.com/lonewolf0622/HelixSR)
 [![Platform](https://img.shields.io/badge/Platform-Windows_10%2F11_%7C_Linux_%26_SteamOS-10B981?style=for-the-badge)](#%EF%B8%8F-installation--quick-start)
 [![Dependencies](https://img.shields.io/badge/Dependencies-Zero_(100%25_Standalone)-8B5CF6?style=for-the-badge)](#%EF%B8%8F-installation--quick-start)
 [![License](https://img.shields.io/badge/License-MIT_%2B_Third--Party-F59E0B?style=for-the-badge)](#%EF%B8%8F-legal-disclaimers-licensing--third-party-notices)
@@ -20,6 +20,7 @@
 
 ## 📑 Table of Contents
 
+1. [🆕 What's New in v1.9.0](#-whats-new-in-v190)
 1. [✨ Key Features](#-key-features)
 2. [🧠 How It Works (Architecture & Injection Routes)](#-how-it-works-architecture--injection-routes)
 3. [⬇️ Installation & Quick Start](#%EF%B8%8F-installation--quick-start)
@@ -31,6 +32,19 @@
 9. [🔧 Troubleshooting & FAQ](#-troubleshooting--faq)
 10. [🙏 Referenced Projects, Credits & Acknowledgments](#-referenced-projects-credits--acknowledgments)
 11. [⚖️ Legal Disclaimers, Licensing & Third-Party Notices](#%EF%B8%8F-legal-disclaimers-licensing--third-party-notices)
+
+---
+
+## 🆕 What's New in v1.9.0
+
+- **HelixSR Core updated from 1.7.0 to [1.8.1](https://github.com/lonewolf0622/HelixSR)** (bundled unmodified in `helixsr_core/HelixSR-1.8.1/`).
+  - **One-file DLL**: the compiler now embeds the network weights and shader kernels directly into `amd_fidelityfx_dx12.dll`. Games only get the single DLL; stale `helixsr_weights.bin` / `helixsr_kernels.pak` copies from older installs are cleaned up automatically.
+  - **Wave32 + Wave64 are always built** - the old Wave64 option is gone, HelixSR picks the right shader set for your GPU.
+  - **AMD FSR frame generation bundled** (`amd_fidelityfx_framegeneration_dx12.dll` 4.1.1): the OptiScaler route deploys it automatically so FSR frame generation keeps working next to HelixSR.
+  - **🧪 Experimental DLSS Loader route**: the HelixSR DLSS loader (`dxgi.dll`) + HelixSR as `nvngx.dll` next to the game's `.exe`, so the game's own DLSS option runs HelixSR without OptiScaler. Offered only for games with DLSS, never selected by default, and guarded by a confirmation dialog. **Do not use it in online games or games with anti-cheat (ban risk).**
+- **Fixed:** the sidebar logo / version pill showed `v1.7` - it now always shows the real app version (and the core version on hover). The window title and the Linux/SteamOS UI show both versions too.
+- **Fixed:** network compilation with Core 1.8.x (the removed `-BuildOnly` switch is no longer passed). After a rebuild the manager refreshes HelixSR in every game it is installed in.
+- Release packaging never includes locally built network files (`fsr3-drop-in/`, `manual-install/`, or a DLL with an embedded network).
 
 ---
 
@@ -58,15 +72,16 @@
 
 ### ⚡ Built-in Neural Network & Shader Compiler Wizard
 - **One-Click Local Compilation**:
-  - Monitors the status and file sizes of `helixsr_weights.bin` and `helixsr_kernels.pak`.
+  - Monitors the compiled network: since HelixSR 1.8 the weights and kernels are embedded in `amd_fidelityfx_dx12.dll` (one-file DLL); separate `helixsr_weights.bin` / `helixsr_kernels.pak` files from older cores are still recognized.
   - Automatically scans your installed games for existing copies of `nvngx_dlss.dll` (DLSS `310.7.0` / `310.2`) so you can compile offline, or downloads the official DLL from NVIDIA's GitHub repository on demand.
   - Automatically downloads portable Python 3.14 + NumPy and Microsoft DirectX Shader Compiler (`dxc.exe` v1.9.2607) into `%LOCALAPPDATA%\HelixSR` (verified via pinned SHA-256 hashes, requiring no administrator privileges or system-wide `PATH` changes).
-  - Includes an optional **Wave64 (`--wave64`)** toggle to compile 64-lane compute shaders alongside wave32 shaders for **AMD RDNA 3 and RDNA 4** GPUs.
-  - **Auto-Sync**: Automatically propagates newly compiled network weights and kernel packages to all currently installed games.
+  - Always compiles both **Wave32 and Wave64** shader sets (since HelixSR 1.8.0); HelixSR picks the right one for your GPU (RDNA 1-4) at runtime.
+  - **Auto-Sync**: After every rebuild, automatically refreshes the HelixSR DLL (with the new network inside) in all currently installed games.
 
 ### 🔌 Advanced Hook, Frame Generation & Compatibility Controls
 - **Per-Game Route & Proxy Selection**:
   - Switch freely between **Direct FSR 3.1 Replacement** and **OptiScaler Proxy Injection** (`dxgi.dll`, `winmm.dll`, `version.dll`, `dbghelp.dll`, `d3d12.dll`, `wininet.dll`, `winhttp.dll`, or `OptiScaler.asi`).
+  - 🧪 **Experimental:** HelixSR 1.8.1's **DLSS Loader** route for DLSS games (no OptiScaler) - opt-in only, single-player games only.
 - **DLSS Frame Generation (`DLSS-G`) Hook & Translation**:
   - Unlock the in-game **NVIDIA DLSS Frame Generation** toggle on AMD and Intel GPUs via `fakenvapi.dll` + OptiScaler (`FGInput = dlssg`) and translate it to **Intel XeSS Frame Generation (`XeFG`)**, **AMD FidelityFX Frame Generation (`FSR-FG`)**, **Nukem's `dlssg-to-fsr3`**, or **Universal `OptiFG`** — while simultaneously running **HelixSR (DLSS Model E)** for Super Resolution!
 - **FakeNVAPI Integration (`fakenvapi.dll`)**:
@@ -97,7 +112,7 @@ flowchart LR
     F --> G["AMD RDNA 1 / 2 / 3 / 4 GPU\n(Wave32 / Wave64 FP16 Compute)"]
 ```
 
-1. **Weight Extraction & PTX Translation**: During the one-time setup step in the **Compiler** tab, `helixsr_setup.py` extracts the Model E weights into `helixsr_weights.bin` and translates the neural network's GPU kernels into HLSL compute shaders, compiling them via Microsoft's DirectX Shader Compiler (`dxc`) into `helixsr_kernels.pak`. If `nvngx_dlss.dll` was downloaded for the build, the original NVIDIA DLL is deleted immediately after compilation.
+1. **Weight Extraction & PTX Translation**: During the one-time setup step in the **Compiler** tab, `helixsr_setup.py` extracts the Model E weights into `helixsr_weights.bin` and translates the neural network's GPU kernels into HLSL compute shaders, compiling them via Microsoft's DirectX Shader Compiler (`dxc`) into `helixsr_kernels.pak`. Since HelixSR 1.8.0 the setup then appends both to `amd_fidelityfx_dx12.dll`, so the built DLL is a single self-contained file. If `nvngx_dlss.dll` was downloaded for the build, the original NVIDIA DLL is deleted immediately after compilation.
 2. **Runtime Execution**: At runtime, HelixSR exposes the standard AMD FidelityFX Super Resolution 3.1 Direct3D 12 API (`amd_fidelityfx_dx12.dll` / `amd_fidelityfx_upscaler_dx12.dll`), allowing it to act either as a direct drop-in replacement for FSR 3.1 or as the FFX backend inside OptiScaler.
 3. **DLSS-Authentic Rendering**:
    - Reports DLSS's exact internal render resolutions per quality mode (from *Ultra Performance* up to native *DLAA*) and dynamic resolution ranges.
@@ -109,12 +124,13 @@ flowchart LR
 
 ### 2. Game Injection Routes
 
-When you click **Install HelixSR** on a game, HelixSR Manager automatically selects (or lets you override) one of two clean injection routes based on the upscaler DLLs found in the game folder:
+When you click **Install HelixSR** on a game, HelixSR Manager automatically selects (or lets you override) one of the injection routes based on the upscaler DLLs found in the game folder:
 
 | Route | Target Games | What HelixSR Manager Deploys | What to Select In-Game |
 | :--- | :--- | :--- | :--- |
-| **Route A: OptiScaler Proxy** | Games with **DLSS**, **DLSS-G**, **XeSS**, or **FSR 2** (`nvngx_dlss.dll`, `nvngx_dlssg.dll`, `libxess.dll`, `ffx_fsr2_api_*.dll`) | • Copies `OptiScaler.dll` next to the game's `.exe` as your chosen proxy hook (default `dxgi.dll`).<br>• Deploys `fakenvapi.dll` + `fakenvapi.ini` (if enabled) to unlock DLSS & DLSS-G on AMD/Intel GPUs.<br>• Creates `<ExeFolder>\HelixSR\` containing `helixsr.dll`, `helixsr_upscaler.dll`, `helixsr_weights.bin`, `helixsr_kernels.pak`, fallback `amd_fidelityfx_upscaler_dx12.amd.dll`, and `my-fsr\`.<br>• Configures `OptiScaler.ini` (`Dx12Upscaler = fsr31`, `FfxDx12Path`, `FfxDx12SRPath`, plus decoupled `FfxDx12FGPath`, `XeFGPath`, `XeLLPath`, and `[FrameGen]` settings).<br>• Backs up any pre-existing proxy DLL or `OptiScaler.ini` in `<ExeFolder>\HelixSR\backup\`. | **NVIDIA DLSS**<br>*(or XeSS / FSR 2 if DLSS is hidden)* |
-| **Route B: Direct FSR 3.1** | Games with native **AMD FSR 3.1** (`amd_fidelityfx_upscaler_dx12.dll` or `amd_fidelityfx_dx12.dll`) | • Renames the game's original FidelityFX DX12 DLL to `*.original.dll`.<br>• Places HelixSR's `amd_fidelityfx_dx12.dll` in its place alongside `helixsr_weights.bin`, `helixsr_kernels.pak`, and `helixsr-install.json`.<br>• Runs directly with zero proxy wrapper overhead. | **AMD FSR 3 / FSR 3.1** |
+| **Route A: OptiScaler Proxy** | Games with **DLSS**, **DLSS-G**, **XeSS**, or **FSR 2** (`nvngx_dlss.dll`, `nvngx_dlssg.dll`, `libxess.dll`, `ffx_fsr2_api_*.dll`) | • Copies `OptiScaler.dll` next to the game's `.exe` as your chosen proxy hook (default `dxgi.dll`).<br>• Deploys `fakenvapi.dll` + `fakenvapi.ini` (if enabled) to unlock DLSS & DLSS-G on AMD/Intel GPUs.<br>• Creates `<ExeFolder>\HelixSR\` containing `helixsr.dll`, `helixsr_upscaler.dll` (network embedded), fallback `amd_fidelityfx_upscaler_dx12.amd.dll`, the bundled `amd_fidelityfx_framegeneration_dx12.dll`, and `my-fsr\`.<br>• Configures `OptiScaler.ini` (`Dx12Upscaler = fsr31`, `FfxDx12Path`, `FfxDx12SRPath`, plus decoupled `FfxDx12FGPath`, `XeFGPath`, `XeLLPath`, and `[FrameGen]` settings).<br>• Backs up any pre-existing proxy DLL or `OptiScaler.ini` in `<ExeFolder>\HelixSR\backup\`. | **NVIDIA DLSS**<br>*(or XeSS / FSR 2 if DLSS is hidden)* |
+| **Route B: Direct FSR 3.1** | Games with native **AMD FSR 3.1** (`amd_fidelityfx_upscaler_dx12.dll` or `amd_fidelityfx_dx12.dll`) | • Renames the game's original FidelityFX DX12 DLL to `*.original.dll`.<br>• Places HelixSR's `amd_fidelityfx_dx12.dll` in its place (network embedded) alongside `helixsr-install.json`.<br>• Runs directly with zero proxy wrapper overhead. | **AMD FSR 3 / FSR 3.1** |
+| **Route C: DLSS Loader** 🧪 *Experimental* | Games with **DLSS** (`nvngx_dlss.dll`) - opt-in only, never the default | • Copies HelixSR's DLSS loader as `dxgi.dll` and HelixSR (one-file DLL) as `nvngx.dll` next to the game's `.exe`.<br>• Backs up a pre-existing `dxgi.dll` / `nvngx.dll` in `<ExeFolder>\HelixSR\backup\`.<br>• No OptiScaler. Tested upstream in very few games; **never use it in online games or games with anti-cheat (ban risk)**. | **NVIDIA DLSS** |
 
 ---
 
@@ -149,7 +165,7 @@ Because NVIDIA's DLSS weights cannot be redistributed, you must compile them onc
 2. Under **Network Compiler Wizard**, choose your DLSS source:
    - **Use from an installed game**: If HelixSR Manager detected a compatible `nvngx_dlss.dll` in one of your installed games, select it from the dropdown for instant offline compilation.
    - **Download automatically from NVIDIA GitHub**: Downloads the official DLSS `310.7.0` DLL from [NVIDIA/DLSS](https://github.com/NVIDIA/DLSS), verifies its SHA-256 checksum, extracts the network, and automatically deletes the NVIDIA DLL when finished.
-3. *(Optional)* If you have an **AMD RDNA 3 (RX 7000 / Z1 Extreme)** or **RDNA 4 (RX 9000)** GPU, check **Compile Wave64 shaders (`--wave64`)**.
+3. Nothing to choose for your GPU: since HelixSR 1.8.0 both **Wave32 and Wave64** shaders are always built into the DLL.
 4. Click **⚡ Compile HelixSR Network & Auto-Sync**.
 5. Wait ~45–90 seconds while the live terminal logs progress. Once complete, the sidebar status indicator will turn green (**`Ready • Weights Built`**).
 
@@ -214,7 +230,7 @@ While `nvngx_dlssg.dll` itself relies on proprietary NVIDIA Optical Flow Acceler
 
 > [!TIP]
 > **Where to place optional Frame Generation DLLs:**
-> Click **📦 Custom FSR (`my-fsr`)** → **📂 Open Core my-fsr Folder** (`helixsr_core/HelixSR-1.7.0/my-fsr/`) and drop in `libxess_fg.dll`, `libxell.dll`, `amd_fidelityfx_framegeneration_dx12.dll`, or `dlssg_to_fsr3_amd_is_better.dll`. HelixSR Manager automatically detects and deploys them to your games and wires `FfxDx12FGPath`, `XeFGPath`, and `XeLLPath` in `OptiScaler.ini`!
+> Click **📦 Custom FSR (`my-fsr`)** → **📂 Open Core my-fsr Folder** (`helixsr_core/HelixSR-1.8.1/my-fsr/`) and drop in `libxess_fg.dll`, `libxell.dll`, `amd_fidelityfx_framegeneration_dx12.dll`, or `dlssg_to_fsr3_amd_is_better.dll`. HelixSR Manager automatically detects and deploys them to your games and wires `FfxDx12FGPath`, `XeFGPath`, and `XeLLPath` in `OptiScaler.ini`!
 
 ---
 
@@ -226,7 +242,7 @@ For games installed via the **OptiScaler Route**, you can compare **HelixSR** si
    - Open the game in HelixSR Manager and click the **📦 my-fsr** button in the Game Drawer (which opens `<GameFolder>\HelixSR\my-fsr\`).
    - Drop your custom FidelityFX DLL (e.g., FSR 4.1.1) into that folder and start the game.
 2. **For All Games**:
-   - Go to the **📦 Custom FSR (`my-fsr`)** tab in HelixSR Manager and click **📂 Open Core my-fsr Folder** (`helixsr_core/HelixSR-1.7.0/my-fsr/`).
+   - Go to the **📦 Custom FSR (`my-fsr`)** tab in HelixSR Manager and click **📂 Open Core my-fsr Folder** (`helixsr_core/HelixSR-1.8.1/my-fsr/`).
    - Drop your custom DLL there and click **Update / Reinstall** on your games.
 3. **Switching In-Game**:
    - Press <kbd>Insert</kbd> in-game to open OptiScaler's HUD.
@@ -279,13 +295,15 @@ HelixSR-Manager/
 │   ├── style.css
 │   └── app.js
 └── helixsr_core/
-    └── HelixSR-1.7.0/                   # Unmodified HelixSR v1.7.0 core distribution
+    └── HelixSR-1.8.1/                   # Unmodified HelixSR v1.8.1 core distribution
         ├── amd_fidelityfx_dx12.dll      # HelixSR Direct3D 12 compute shader runtime DLL
         ├── helixsr-setup.ps1            # Windows network & shader compiler script (Apache-2.0)
         ├── helixsr-setup.sh             # Linux / Proton network & shader compiler script (Apache-2.0)
+        ├── helixsr-uninstall.*          # Upstream uninstall scripts (Apache-2.0)
         ├── setup/                       # PTX-to-HLSL translator, weight extractor & kernel headers
         ├── optiscaler/                  # Unmodified OptiScaler v0.9.4 (GPL-3.0) & fakenvapi (MIT)
-        ├── amd-fsr/                     # Unmodified AMD FidelityFX Upscaler v4.1.1 DLL & license
+        ├── amd-fsr/                     # Unmodified AMD FidelityFX Upscaler & Frame Generation v4.1.1 DLLs & license
+        ├── dlss-loader/                 # HelixSR DLSS loader (dxgi.dll) for the experimental DLSS route
         ├── my-fsr/                      # Drop-in directory for user-supplied custom FSR & FG DLLs
         ├── LICENSE                      # HelixSR Freeware License
         ├── LICENSE-APACHE-2.0           # Apache License 2.0 for setup scripts
@@ -298,7 +316,7 @@ HelixSR-Manager/
 ## 🔧 Troubleshooting & FAQ
 
 - **Red border around the screen, low resolution, or shaking/jittering image in-game:**
-  - This indicates that HelixSR's neural network is not running because `helixsr_weights.bin` or `helixsr_kernels.pak` are missing or corrupted.
+  - This indicates that HelixSR's neural network is not running because it has not been compiled yet (or the DLL in the game is an old/uncompiled copy).
   - Open **HelixSR Manager**, go to the **⚡ Compiler** tab, click **Compile HelixSR Network & Auto-Sync**, and then click **Update / Reinstall** on the game.
 - **Game crashes on startup after installing or switching upscaler hooks:**
   1. Click the **🧹 Cache** button in the Game Drawer to clear stale `shader.cache2` / DirectX 12 pipeline caches.
@@ -317,7 +335,7 @@ HelixSR-Manager/
 
 | Project | Author / Maintainer | Role in HelixSR Manager | License |
 | :--- | :--- | :--- | :--- |
-| **[HelixSR](https://github.com/lonewolf0622/HelixSR)** | **[lonewolf0622](https://github.com/lonewolf0622)** | Core Direct3D 12 DLSS Model E compute shader runtime (`amd_fidelityfx_dx12.dll`, v1.7.0) and PTX-to-HLSL network compiler (`setup/`). | HelixSR Freeware License & Apache-2.0 |
+| **[HelixSR](https://github.com/lonewolf0622/HelixSR)** | **[lonewolf0622](https://github.com/lonewolf0622)** | Core Direct3D 12 DLSS Model E compute shader runtime (`amd_fidelityfx_dx12.dll`, v1.8.1) and PTX-to-HLSL network compiler (`setup/`). | HelixSR Freeware License & Apache-2.0 |
 | **[OptiScaler](https://github.com/OptiScaler/OptiScaler)** | **OptiScaler Contributors** ([cdozdil](https://github.com/cdozdil) et al.) | Unmodified official release (`v0.9.4`) used as an upscaler and Frame Generation proxy (`FGInput = dlssg` / `OptiFG`) to route DLSS, XeSS, and FSR 2 inputs to HelixSR. | GNU GPL v3.0 |
 | **[fakenvapi](https://github.com/FakeMichau/fakenvapi)** | **[FakeMichau](https://github.com/FakeMichau)** | Unmodified NVAPI & Reflex translation layer (`fakenvapi.dll`) bundled with OptiScaler to unlock DLSS and DLSS Frame Generation UI options on AMD and Intel GPUs. | MIT License |
 | **[dlssg-to-fsr3](https://github.com/Nukem9/dlssg-to-fsr3)** | **[Nukem9](https://github.com/Nukem9)** | Optional user-supplied Streamline `dlssg` to FSR 3.1 Frame Generation swapchain translator (`dlssg_to_fsr3_amd_is_better.dll`) supported via `FGOutput = nukems`. | LGPL-3.0 |
@@ -349,7 +367,7 @@ HelixSR-Manager/
 
 ### 2. No Proprietary NVIDIA Software or Neural Network Weights Included
 - **Neither this GitHub repository nor any of its release archives (`helixsr-manager-windows.zip`, `helixsr-manager-linux.zip`) contain NVIDIA's `nvngx_dlss.dll`, NVIDIA neural network weights (`helixsr_weights.bin`), or NVIDIA-derived compiled shaders (`helixsr_kernels.pak`).**
-- During local setup, the compiler scripts (`helixsr_core/HelixSR-1.7.0/setup/`) either use a local copy of `nvngx_dlss.dll` already present on the user's computer or download `nvngx_dlss.dll` directly from NVIDIA's official GitHub repository ([github.com/NVIDIA/DLSS](https://github.com/NVIDIA/DLSS), subject to NVIDIA's own license terms) to generate `helixsr_weights.bin` and `helixsr_kernels.pak` locally on the user's machine.
+- During local setup, the compiler scripts (`helixsr_core/HelixSR-1.8.1/setup/`) either use a local copy of `nvngx_dlss.dll` already present on the user's computer or download `nvngx_dlss.dll` directly from NVIDIA's official GitHub repository ([github.com/NVIDIA/DLSS](https://github.com/NVIDIA/DLSS), subject to NVIDIA's own license terms) to generate `helixsr_weights.bin` and `helixsr_kernels.pak` locally on the user's machine.
 - Those locally generated files (`helixsr_weights.bin` and `helixsr_kernels.pak`) remain the exclusive intellectual property of **NVIDIA Corporation**, are not covered by any license in this repository, are strictly for personal use on the computer where they were generated, and **must NEVER be shared, uploaded, hosted, or redistributed**.
 
 ### 3. Software Licenses & Redistribution Compliance
@@ -357,21 +375,21 @@ This distribution is a multi-license aggregation. Each component is governed by 
 
 1. **HelixSR Manager GUI & Wrapper Application (`src/`, `public/`, `build-exe.bat`, `HelixSR-Manager.exe`)**:
    - Copyright © 2026 **Denarmo**. Licensed under the **[MIT License](LICENSE)**.
-2. **HelixSR Core (`helixsr_core/HelixSR-1.7.0/amd_fidelityfx_dx12.dll` and documentation)**:
+2. **HelixSR Core (`helixsr_core/HelixSR-1.8.1/amd_fidelityfx_dx12.dll` and documentation)**:
    - Copyright © 2026 **lonewolf0622**. All rights reserved.
-   - Governed by the **[HelixSR Freeware License](helixsr_core/HelixSR-1.7.0/LICENSE)**.
+   - Governed by the **[HelixSR Freeware License](helixsr_core/HelixSR-1.8.1/LICENSE)**.
    - Redistributed here **unmodified, complete, including all original licenses and notices, and completely free of charge** in strict compliance with Section 2 of the HelixSR Freeware License.
    - Per Section 3 of the HelixSR Freeware License, you may not modify HelixSR's compiled binaries, create derivative works of its compiled binaries, or reverse engineer, decompile, or disassemble them, nor may you sell, rent, sublicense, or host HelixSR as part of any paid product or service.
-3. **HelixSR Setup & Compiler Scripts (`helixsr_core/HelixSR-1.7.0/helixsr-setup.*` and `setup/`)**:
-   - Copyright © 2026 **lonewolf0622**. Licensed under the **[Apache License, Version 2.0](helixsr_core/HelixSR-1.7.0/LICENSE-APACHE-2.0)**.
-4. **OptiScaler (`helixsr_core/HelixSR-1.7.0/optiscaler/OptiScaler.dll` & `OptiScaler.ini`)**:
-   - Included unmodified from the official OptiScaler v0.9.4 release under the **[GNU General Public License v3.0 (GPL-3.0)](helixsr_core/HelixSR-1.7.0/optiscaler/LICENSE-GPL-3.0.txt)**.
-   - Complete source code for OptiScaler v0.9.4 is available at [https://github.com/OptiScaler/OptiScaler/releases/tag/v0.9.4](https://github.com/OptiScaler/OptiScaler/releases/tag/v0.9.4) (see [SOURCE.md](helixsr_core/HelixSR-1.7.0/SOURCE.md)).
+3. **HelixSR Setup & Compiler Scripts (`helixsr_core/HelixSR-1.8.1/helixsr-setup.*` and `setup/`)**:
+   - Copyright © 2026 **lonewolf0622**. Licensed under the **[Apache License, Version 2.0](helixsr_core/HelixSR-1.8.1/LICENSE-APACHE-2.0)**.
+4. **OptiScaler (`helixsr_core/HelixSR-1.8.1/optiscaler/OptiScaler.dll` & `OptiScaler.ini`)**:
+   - Included unmodified from the official OptiScaler v0.9.4 release under the **[GNU General Public License v3.0 (GPL-3.0)](helixsr_core/HelixSR-1.8.1/optiscaler/LICENSE-GPL-3.0.txt)**.
+   - Complete source code for OptiScaler v0.9.4 is available at [https://github.com/OptiScaler/OptiScaler/releases/tag/v0.9.4](https://github.com/OptiScaler/OptiScaler/releases/tag/v0.9.4) (see [SOURCE.md](helixsr_core/HelixSR-1.8.1/SOURCE.md)).
    - OptiScaler is distributed alongside HelixSR as a separate, independent program (mere aggregation under GPLv3 Section 5). Neither HelixSR nor HelixSR Manager links against or incorporates GPL-licensed source code.
-5. **fakenvapi (`helixsr_core/HelixSR-1.7.0/optiscaler/fakenvapi.dll` & `fakenvapi.ini`)**:
-   - Included unmodified under the **[MIT License](helixsr_core/HelixSR-1.7.0/optiscaler/fakenvapi-LICENSE.txt)**. Source code: [https://github.com/FakeMichau/fakenvapi](https://github.com/FakeMichau/fakenvapi).
-6. **AMD FidelityFX Upscaler (`helixsr_core/HelixSR-1.7.0/amd-fsr/amd_fidelityfx_upscaler_dx12.dll`)**:
-   - Copyright © Advanced Micro Devices, Inc. Included unmodified in binary form under the **[AMD FidelityFX License](helixsr_core/HelixSR-1.7.0/amd-fsr/FidelityFX_v2_LICENSE.md)** and MIT-licensed Lanczos weight approximation notice in **[THIRD_PARTY_NOTICES.md](helixsr_core/HelixSR-1.7.0/THIRD_PARTY_NOTICES.md)**.
+5. **fakenvapi (`helixsr_core/HelixSR-1.8.1/optiscaler/fakenvapi.dll` & `fakenvapi.ini`)**:
+   - Included unmodified under the **[MIT License](helixsr_core/HelixSR-1.8.1/optiscaler/fakenvapi-LICENSE.txt)**. Source code: [https://github.com/FakeMichau/fakenvapi](https://github.com/FakeMichau/fakenvapi).
+6. **AMD FidelityFX Upscaler (`helixsr_core/HelixSR-1.8.1/amd-fsr/amd_fidelityfx_upscaler_dx12.dll`)**:
+   - Copyright © Advanced Micro Devices, Inc. Included unmodified in binary form under the **[AMD FidelityFX License](helixsr_core/HelixSR-1.8.1/amd-fsr/FidelityFX_v2_LICENSE.md)** and MIT-licensed Lanczos weight approximation notice in **[THIRD_PARTY_NOTICES.md](helixsr_core/HelixSR-1.8.1/THIRD_PARTY_NOTICES.md)**.
 
 ### 4. Anti-Cheat & Online Multiplayer Warning
 > [!WARNING]

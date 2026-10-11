@@ -196,6 +196,17 @@ def rdna3_or_newer(dev):
 
 
 EMBED_MAGIC = b'HXSRNET1'
+DROP_IN_README = '''HelixSR for FSR 3.1 games, one file (the network is inside the DLL).
+
+Most FSR 3.1 games: go to the folder that holds the game's amd_fidelityfx_upscaler_dx12.dll (or, if there is none,
+amd_fidelityfx_dx12.dll), rename the game's file to amd_fidelityfx_upscaler_dx12.original.dll (or
+amd_fidelityfx_dx12.original.dll), and copy the file with the same name from this folder there. Start the game and
+pick AMD FSR. Keep the .original.dll: FSR frame generation keeps working through it, and renaming it back undoes
+everything. helixsr.log next to the DLL shows what HelixSR is doing.
+
+The setup does this for you for the games it finds. These DLLs contain NVIDIA's network: they are for your own PC,
+do not share or upload them.
+'''
 
 
 def embed(dll_path, weights, pak):
@@ -288,13 +299,9 @@ def main():
     # Every shader is also built for 64-lane waves ("<name>_w64"): GPUs without wave32 (GCN/Vega) use those. The text
     # is the same with the wave-size attribute changed; the arithmetic does not depend on the wave size. --no-wave64
     # skips them (about half the build time) for GPUs known to run wave32 (RDNA 1-4).
-    # The 64-lane copies are only used by RDNA 3 and newer: built when this PC has one, when the GPU is not known, or
-    # with --wave64 (for example to take the DLL to another PC); --no-wave64 never builds them.
-    gpus = amd_gpus()
-    want64 = '--wave64' in a or ('--no-wave64' not in a and (not gpus or any(rdna3_or_newer(g) for g in gpus)))
-    if not want64 and '--no-wave64' not in a:
-        step(f'this PC\'s GPU ({", ".join(f"1002:{g:04x}" for g in sorted(gpus))}) uses the 32-lane shaders: building only '
-             'those (--wave64 builds the RDNA 3 ones too)')
+    # Both sizes are always built (as 1.4.3), whatever this PC's GPU: the DLL picks per GPU at run time; --no-wave64
+    # skips the 64-lane copies.
+    want64 = '--no-wave64' not in a
     jobs = []   # (blob name, dxc command, output): all prepared first, then compiled in parallel
     for name, d, f in shaders:
         cso = work / f'{name}.cso'
@@ -370,13 +377,21 @@ def main():
     BAR.report_times()
     if not keep:
         shutil.rmtree(work, ignore_errors=True)
-    target = out / 'nvngx.dll'
+    # one-file DLL: the network is appended to the package's HelixSR DLL and the two files are removed (the installer
+    # copies only the DLL; fsr3-drop-in/ gets copies under FSR 3.1's file names). A 1.5/1.6 nvngx.dll is still filled.
+    target = next((p for p in (out / 'amd_fidelityfx_dx12.dll', out / 'nvngx.dll') if p.exists()), out / 'nvngx.dll')
     if '--separate-files' not in a and target.exists():
         size = embed(target, (out / 'helixsr_weights.bin').read_bytes(), (out / 'helixsr_kernels.pak').read_bytes())
         (out / 'helixsr_weights.bin').unlink()
         (out / 'helixsr_kernels.pak').unlink()
         step(f'done: {target} now carries the network ({len(blobs)} shaders, {size / 1e6:.1f} MB, checked on disk)')
-        step('it contains NVIDIA\'s network: it is for your own PC, do not share or upload it')
+        drop = out / 'fsr3-drop-in'
+        drop.mkdir(exist_ok=True)
+        for n in ('amd_fidelityfx_dx12.dll', 'amd_fidelityfx_upscaler_dx12.dll'):
+            shutil.copyfile(target, drop / n)
+        (drop / 'README.txt').write_text(DROP_IN_README, newline='\r\n' if os.name != 'nt' else None)
+        step(f'drop-in DLLs for FSR 3.1 games: {drop}')
+        step('they contain NVIDIA\'s network: they are for your own PC, do not share or upload them')
     else:
         for n in ('helixsr_weights.bin', 'helixsr_kernels.pak'):   # what is on disk now (antivirus, synced folders)
             if not (out / n).exists() or (out / n).stat().st_size == 0:

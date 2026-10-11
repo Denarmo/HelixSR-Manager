@@ -160,7 +160,7 @@ namespace HelixSRSwapper
             }
             catch { }
 
-            Title = "HelixSR Manager — Neural Upscaler & Game Manager";
+            Title = string.Format("HelixSR Manager v{0} — Neural Upscaler & Game Manager", Engine.AppVersion);
             Width = 1320;
             Height = 850;
             MinWidth = 1020;
@@ -907,7 +907,8 @@ namespace HelixSRSwapper
                 Margin = new Thickness(7, 2, 0, 0),
                 VerticalAlignment = VerticalAlignment.Center
             };
-            verPill.Child = new TextBlock { Text = "v1.7", FontSize = 9.5, FontWeight = FontWeights.Bold, Foreground = AccentEmerald };
+            verPill.Child = new TextBlock { Text = "v" + Engine.AppVersion, FontSize = 9.5, FontWeight = FontWeights.Bold, Foreground = AccentEmerald };
+            verPill.ToolTip = string.Format("HelixSR Manager v{0} • HelixSR Core v{1}", Engine.AppVersion, Engine.CoreVersion);
             titleRow.Children.Add(verPill);
 
             var subtitle = new TextBlock
@@ -2114,8 +2115,19 @@ namespace HelixSRSwapper
                     });
                 }
 
-                string targetTag = game.Route == "direct"
-                    ? "direct"
+                // HelixSR 1.8.1: experimental DLSS loader (games with DLSS only, never the default)
+                bool hasDlss = game.Inputs != null && game.Inputs.Contains("DLSS");
+                if ((hasDlss && Engine.IsDlssLoaderAvailable()) || game.Route == "dlss")
+                {
+                    _cmbDrawerInstallMethod.Items.Add(new ComboBoxItem
+                    {
+                        Content = "⚠ EXPERIMENTAL — DLSS Loader (HelixSR as the game's own DLSS, no OptiScaler)",
+                        Tag = "dlss"
+                    });
+                }
+
+                string targetTag = game.Route == "direct" || game.Route == "dlss"
+                    ? game.Route
                     : "optiscaler:" + (string.IsNullOrEmpty(game.OptiDllName) ? "dxgi.dll" : game.OptiDllName);
 
                 int selectedIdx = 0;
@@ -2175,9 +2187,9 @@ namespace HelixSRSwapper
             if (cbi == null || cbi.Tag == null) return;
 
             string tag = cbi.Tag.ToString();
-            if (tag == "direct")
+            if (tag == "direct" || tag == "dlss")
             {
-                _selectedGame.Route = "direct";
+                _selectedGame.Route = tag;
             }
             else if (tag.StartsWith("optiscaler:"))
             {
@@ -2239,6 +2251,19 @@ namespace HelixSRSwapper
                     "3. Select NVIDIA DLSS as your upscaler (and enable DLSS Frame Generation if using a DLSS-G hook).\n" +
                     "4. Press the Insert key in-game to open OptiScaler's HUD and customize HelixSR & Frame Generation.",
                     optiDll, _selectedGame.Installed ? "Update / Reinstall" : "Install HelixSR");
+            }
+            else if (_selectedGame.Route == "dlss")
+            {
+                _txtDrawerMethodHint.Text = "EXPERIMENTAL (HelixSR 1.8.1): puts HelixSR's DLSS loader (dxgi.dll) and HelixSR as nvngx.dll next to the game's .exe, so the game's own DLSS option runs HelixSR without OptiScaler. Tested in very few games, Linux (Proton) only, NOT on Windows. May not work or may crash the game. Never use it in online games or games with anti-cheat (ban risk).";
+                _txtDrawerMethod.Text = _selectedGame.InstallReFramework
+                    ? "DLSS Loader (Experimental) + REFramework Nightly (dinput8.dll)"
+                    : "DLSS Loader (Experimental — select DLSS in game)";
+                _txtDrawerGuide.Text = string.Format(
+                    "1. Click '{0}' above (you will be asked to confirm the experimental warning).\n" +
+                    "2. Start the game and open Graphics / Display settings.\n" +
+                    "3. Select NVIDIA DLSS. Leave NVIDIA-only options (Reflex, Frame Generation) off.\n" +
+                    "4. If it misbehaves, switch back to Direct FSR 3.1 or OptiScaler and reinstall (or Restore / Uninstall).",
+                    _selectedGame.Installed ? "Update / Reinstall" : "Install HelixSR");
             }
             else
             {
@@ -2327,16 +2352,29 @@ namespace HelixSRSwapper
             if (!coreStatus.WeightsBuilt)
             {
                 var res = MessageBox.Show(this,
-                    "HelixSR network weights and compute shaders have not been compiled yet (helixsr_weights.bin & helixsr_kernels.pak).\n\n" +
-                    "Without compiled weights, the game's shader pipeline will crash during startup or compilation.\n\n" +
-                    "Would you like to switch to the 'Engine & Weights' tab to build them now?",
-                    "Weights Not Compiled", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                    "The HelixSR network has not been built yet (HelixSR 1.8+ builds it into amd_fidelityfx_dx12.dll).\n\n" +
+                    "Without the network, HelixSR cannot upscale and the game may fail to start.\n\n" +
+                    "Would you like to switch to the 'Engine & Weights' tab to build it now?",
+                    "Network Not Built", MessageBoxButton.YesNo, MessageBoxImage.Warning);
 
                 if (res == MessageBoxResult.Yes)
                 {
                     SwitchTab("core");
                     return;
                 }
+            }
+
+            if (_selectedGame.Route == "dlss")
+            {
+                var confirm = MessageBox.Show(this,
+                    "EXPERIMENTAL: DLSS without OptiScaler (HelixSR 1.8.1)\n\n" +
+                    "• Tested in very few games, on Linux (Proton) only — NOT tested on Windows.\n" +
+                    "• It may not work or may crash the game.\n" +
+                    "• Do NOT use it in online games or games with anti-cheat (ban risk).\n" +
+                    "• Leave NVIDIA-only options (Reflex, Frame Generation) off.\n\n" +
+                    "Install the DLSS loader for " + _selectedGame.Name + " anyway?",
+                    "Experimental DLSS Loader", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+                if (confirm != MessageBoxResult.Yes) return;
             }
 
             try
@@ -2487,9 +2525,10 @@ namespace HelixSRSwapper
             });
             stack.Children.Add(new TextBlock
             {
-                Text = "HelixSR runs NVIDIA DLSS Model E neural networks as pure Direct3D 12 compute shaders. Network weights and HLSL kernels are compiled locally.",
+                Text = string.Format("HelixSR runs NVIDIA DLSS Model E neural networks as pure Direct3D 12 compute shaders. Since Core {0} the network is built locally once and embedded into HelixSR's DLL (one file per game).", Engine.CoreVersion),
                 FontSize = 13,
                 Foreground = TextMuted,
+                TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 20)
             });
 
@@ -2507,8 +2546,8 @@ namespace HelixSRSwapper
             sStack.Children.Add(new TextBlock { Text = "Network Artifacts Telemetry", FontSize = 15, FontWeight = FontWeights.Bold, Foreground = TextMain, Margin = new Thickness(0, 0, 0, 12) });
 
             _txtWeightsStatus = new TextBlock { Text = "Checking...", FontSize = 13.5, FontWeight = FontWeights.Bold, Foreground = AccentEmerald, Margin = new Thickness(0, 0, 0, 8) };
-            _txtWeightsSize = new TextBlock { Text = "helixsr_weights.bin: -", FontSize = 12, Foreground = TextMuted, Margin = new Thickness(0, 0, 0, 4) };
-            _txtKernelsSize = new TextBlock { Text = "helixsr_kernels.pak: -", FontSize = 12, Foreground = TextMuted, Margin = new Thickness(0, 0, 0, 4) };
+            _txtWeightsSize = new TextBlock { Text = "Weights: -", FontSize = 12, Foreground = TextMuted, Margin = new Thickness(0, 0, 0, 4) };
+            _txtKernelsSize = new TextBlock { Text = "Kernels: -", FontSize = 12, Foreground = TextMuted, Margin = new Thickness(0, 0, 0, 4) };
             _txtToolchainStatus = new TextBlock { Text = "Local Toolchain: -", FontSize = 12, Foreground = TextMuted, Margin = new Thickness(0, 0, 0, 4) };
 
             sStack.Children.Add(_txtWeightsStatus);
@@ -2541,12 +2580,14 @@ namespace HelixSRSwapper
             _cmbDlssSource.Items.Add("Download automatically from NVIDIA GitHub");
             _cmbDlssSource.SelectedIndex = 0;
 
+            // HelixSR 1.8.0+ always builds both the 32- and 64-lane shaders; the DLL picks per GPU at run time
             _chkWave64 = new System.Windows.Controls.CheckBox
             {
-                Content = "Compile Wave64 shaders (--wave64) for AMD RDNA 3 / RDNA 4",
+                Content = "Wave32 + Wave64 shaders (RDNA 1–4) — always built since Core 1.8.0, picked per GPU at run time",
                 Foreground = TextMain,
                 FontSize = 12,
-                Cursor = Cursors.Hand,
+                IsChecked = true,
+                IsEnabled = false,
                 Margin = new Thickness(0, 0, 0, 16)
             };
 
@@ -2568,7 +2609,7 @@ namespace HelixSRSwapper
                 IsReadOnly = true,
                 AcceptsReturn = true,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Text = "Ready to compile. Press 'Compile HelixSR Network & Auto-Sync' to build weights and shaders."
+                Text = "Ready to compile. Press 'Compile HelixSR Network & Auto-Sync' to build the network into HelixSR's DLL."
             };
 
             bStack.Children.Add(_cmbDlssSource);
@@ -3283,25 +3324,34 @@ namespace HelixSRSwapper
             {
                 if (_dotCoreStatus != null) _dotCoreStatus.Fill = AccentEmerald;
                 if (_dotSidebarCardStatus != null) _dotSidebarCardStatus.Fill = AccentEmerald;
-                if (_txtSidebarCardStatus != null) _txtSidebarCardStatus.Text = "Ready • Weights Built";
+                if (_txtSidebarCardStatus != null) _txtSidebarCardStatus.Text = "Ready • Network Built";
                 if (_barSidebarProgress != null) _barSidebarProgress.Width = 195;
 
-                _txtWeightsStatus.Text = "✔ Network Weights & Kernels: READY";
                 _txtWeightsStatus.Foreground = AccentEmerald;
-                _txtWeightsSize.Text = string.Format("helixsr_weights.bin: {0:F2} MB", st.WeightsSize / (1024.0 * 1024.0));
-                _txtKernelsSize.Text = string.Format("helixsr_kernels.pak: {0:F2} MB", st.KernelsSize / (1024.0 * 1024.0));
+                if (st.NetworkEmbedded)
+                {
+                    _txtWeightsStatus.Text = string.Format("✔ Network: READY (embedded in amd_fidelityfx_dx12.dll, {0:F2} MB)", st.DllSize / (1024.0 * 1024.0));
+                    _txtWeightsSize.Text = string.Format("Weights (embedded): {0:F2} MB", st.WeightsSize / (1024.0 * 1024.0));
+                    _txtKernelsSize.Text = string.Format("DXIL kernels (embedded): {0:F2} MB", st.KernelsSize / (1024.0 * 1024.0));
+                }
+                else
+                {
+                    _txtWeightsStatus.Text = "✔ Network: READY (separate files from an older setup — rebuild to embed it)";
+                    _txtWeightsSize.Text = string.Format("helixsr_weights.bin: {0:F2} MB", st.WeightsSize / (1024.0 * 1024.0));
+                    _txtKernelsSize.Text = string.Format("helixsr_kernels.pak: {0:F2} MB", st.KernelsSize / (1024.0 * 1024.0));
+                }
             }
             else
             {
                 if (_dotCoreStatus != null) _dotCoreStatus.Fill = AccentAmber;
                 if (_dotSidebarCardStatus != null) _dotSidebarCardStatus.Fill = AccentAmber;
-                if (_txtSidebarCardStatus != null) _txtSidebarCardStatus.Text = "Action Needed • Build Weights";
+                if (_txtSidebarCardStatus != null) _txtSidebarCardStatus.Text = "Action Needed • Build Network";
                 if (_barSidebarProgress != null) _barSidebarProgress.Width = 65;
 
-                _txtWeightsStatus.Text = "⚠ Network Weights & Kernels: NOT BUILT (Run Compiler below)";
+                _txtWeightsStatus.Text = "⚠ Network: NOT BUILT (Run Compiler below)";
                 _txtWeightsStatus.Foreground = AccentAmber;
-                _txtWeightsSize.Text = "helixsr_weights.bin: Missing";
-                _txtKernelsSize.Text = "helixsr_kernels.pak: Missing";
+                _txtWeightsSize.Text = "Weights: Missing";
+                _txtKernelsSize.Text = "DXIL kernels: Missing";
             }
 
             _txtToolchainStatus.Text = st.HasPython && st.HasDxc ? "Toolchain: Installed in LocalAppData" : "Toolchain: Will download automatically on first compile";
@@ -3338,7 +3388,10 @@ namespace HelixSRSwapper
             _txtCompileConsole.Text = "Starting HelixSR Network compiler...\n";
 
             string ps1 = Path.Combine(Engine.CoreDir, "helixsr-setup.ps1");
-            var args = new List<string> { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", string.Format("\"{0}\"", ps1), "-Yes", "-Rebuild", "-BuildOnly" };
+            // HelixSR 1.8+ setup: -BuildOnly no longer exists; the game step that follows the build reads stdin, which is
+            // closed below, so it exits right away (EOF) and the Manager handles the game installs itself.
+            // Both wave sizes are always built since 1.8.0, so -Wave64 is not needed.
+            var args = new List<string> { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", string.Format("\"{0}\"", ps1), "-Yes", "-Rebuild" };
 
             if (_cmbDlssSource.SelectedIndex > 0)
             {
@@ -3353,11 +3406,6 @@ namespace HelixSRSwapper
                 }
             }
 
-            if (_chkWave64.IsChecked == true)
-            {
-                args.Add("-Wave64");
-            }
-
             var startInfo = new ProcessStartInfo
             {
                 FileName = "powershell.exe",
@@ -3369,18 +3417,36 @@ namespace HelixSRSwapper
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+            startInfo.EnvironmentVariables["PYTHONUNBUFFERED"] = "1";
 
             var proc = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             _compileProc = proc;
+
+            // Once upstream's interactive game step starts, its prompts are irrelevant here: hide them
+            bool[] installerPhase = new bool[] { false };
 
             proc.OutputDataReceived += delegate(object s, DataReceivedEventArgs e)
             {
                 if (!string.IsNullOrEmpty(e.Data) && !_isClosing)
                 {
+                    string line = e.Data;
+                    bool announce = false;
+                    if (!installerPhase[0] && line.IndexOf("looking for games", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        installerPhase[0] = true;
+                        announce = true;
+                    }
+                    else if (installerPhase[0])
+                    {
+                        return;
+                    }
+
                     Dispatcher.BeginInvoke(new Action(delegate
                     {
                         if (_isClosing) return;
-                        _txtCompileConsole.AppendText(e.Data + "\n");
+                        _txtCompileConsole.AppendText(announce
+                            ? "[helixsr-manager] network build complete; install HelixSR per game from the Games Library.\n"
+                            : line + "\n");
                         _txtCompileConsole.ScrollToEnd();
                     }));
                 }
@@ -3410,11 +3476,12 @@ namespace HelixSRSwapper
                     _btnStartBuild.IsEnabled = true;
                     _txtCompileConsole.AppendText("\nCompilation process finished.\n");
                     UpdateCoreStatus();
-                    int synced = Engine.SyncNetworkFilesToInstalledGames();
+                    int synced = Engine.SyncHelixSRToInstalledGames();
                     if (synced > 0)
                     {
-                        _txtCompileConsole.AppendText(string.Format("Auto-synced updated weights & kernels to {0} installed game(s).\n", synced));
+                        _txtCompileConsole.AppendText(string.Format("Auto-synced the rebuilt HelixSR DLL to {0} installed game(s).\n", synced));
                         _txtCompileConsole.ScrollToEnd();
+                        RefreshGames();
                     }
                     ShowToast("Network compilation finished");
                 }));

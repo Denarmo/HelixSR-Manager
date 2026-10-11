@@ -2836,45 +2836,9 @@ namespace HelixSRSwapper
             }
         }
 
-        private Border BuildGameCard(GameInfo game)
+
+        private void BuildImageSection(GameInfo game, Grid grid)
         {
-            var scaleTrans = new ScaleTransform(1.0, 1.0);
-            var translateTrans = new TranslateTransform(0, 0);
-            var transformGroup = new TransformGroup();
-            transformGroup.Children.Add(scaleTrans);
-            transformGroup.Children.Add(translateTrans);
-
-            var cardShadow = new DropShadowEffect
-            {
-                Color = Colors.Black,
-                BlurRadius = 16,
-                ShadowDepth = 5,
-                Opacity = _isLightTheme ? 0.12 : 0.48
-            };
-
-            var card = new Border
-            {
-                Width = 204,
-                Height = 304,
-                CornerRadius = new CornerRadius(14),
-                Background = BgCard,
-                BorderBrush = game.Installed ? AccentEmerald : BorderColor,
-                BorderThickness = new Thickness(game.Installed ? 2 : 1),
-                Margin = new Thickness(9),
-                Cursor = Cursors.Hand,
-                RenderTransformOrigin = new Point(0.5, 0.5),
-                RenderTransform = transformGroup,
-                Effect = cardShadow
-            };
-
-            var innerClip = new Border
-            {
-                CornerRadius = new CornerRadius(12),
-                ClipToBounds = true
-            };
-
-            var grid = new Grid();
-
             // Fallback Title Container
             var fallback = new Border
             {
@@ -2900,7 +2864,11 @@ namespace HelixSRSwapper
             grid.Children.Add(img);
 
             LoadArtworkAsync(game.LocalCoverPath, game.RemoteCoverUrl, game.AppId, "cover", img, fallback);
+        }
 
+
+        private void BuildBadges(GameInfo game, Grid grid)
+        {
             // Top Badges
             var topPanel = new WrapPanel
             {
@@ -2953,7 +2921,11 @@ namespace HelixSRSwapper
                 topPanel.Children.Add(reBadge);
             }
             grid.Children.Add(topPanel);
+        }
 
+
+        private Border BuildHoverBadge(GameInfo game, Grid grid)
+        {
             // Hover Quick-Action Pill Overlay
             var hoverBadge = new Border
             {
@@ -2975,7 +2947,12 @@ namespace HelixSRSwapper
                 Foreground = AccentEmerald
             };
             grid.Children.Add(hoverBadge);
+            return hoverBadge;
+        }
 
+
+        private void BuildTextSection(GameInfo game, Grid grid)
+        {
             // Bottom Scrim / Details
             var bottomScrim = new Border
             {
@@ -3031,10 +3008,11 @@ namespace HelixSRSwapper
             bStack.Children.Add(metaRow);
             bottomScrim.Child = bStack;
             grid.Children.Add(bottomScrim);
+        }
 
-            innerClip.Child = grid;
-            card.Child = innerClip;
 
+        private void AttachEventHandlers(GameInfo game, Border card, ScaleTransform scaleTrans, TranslateTransform translateTrans, Border hoverBadge)
+        {
             // Smooth Reactive Hover Animations (Scale + Lift + Glow)
             card.MouseEnter += delegate
             {
@@ -3105,6 +3083,58 @@ namespace HelixSRSwapper
             ctx.Items.Add(miCopyPath);
 
             card.ContextMenu = ctx;
+        }
+
+        private Border BuildGameCard(GameInfo game)
+        {
+
+            var scaleTrans = new ScaleTransform(1.0, 1.0);
+            var translateTrans = new TranslateTransform(0, 0);
+            var transformGroup = new TransformGroup();
+            transformGroup.Children.Add(scaleTrans);
+            transformGroup.Children.Add(translateTrans);
+
+            var cardShadow = new DropShadowEffect
+            {
+                Color = Colors.Black,
+                BlurRadius = 16,
+                ShadowDepth = 5,
+                Opacity = _isLightTheme ? 0.12 : 0.48
+            };
+
+            var card = new Border
+            {
+                Width = 204,
+                Height = 304,
+                CornerRadius = new CornerRadius(14),
+                Background = BgCard,
+                BorderBrush = game.Installed ? AccentEmerald : BorderColor,
+                BorderThickness = new Thickness(game.Installed ? 2 : 1),
+                Margin = new Thickness(9),
+                Cursor = Cursors.Hand,
+                RenderTransformOrigin = new Point(0.5, 0.5),
+                RenderTransform = transformGroup,
+                Effect = cardShadow
+            };
+
+            var innerClip = new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                ClipToBounds = true
+            };
+
+            var grid = new Grid();
+
+            BuildImageSection(game, grid);
+            BuildBadges(game, grid);
+            var hoverBadge = BuildHoverBadge(game, grid);
+            BuildTextSection(game, grid);
+
+            innerClip.Child = grid;
+            card.Child = innerClip;
+
+            AttachEventHandlers(game, card, scaleTrans, translateTrans, hoverBadge);
+
             return card;
         }
 

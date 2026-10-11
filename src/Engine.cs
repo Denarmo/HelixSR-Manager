@@ -1420,6 +1420,8 @@ namespace HelixSRSwapper
 
         public static string SetIniValue(string text, string key, string value, string section)
         {
+            if (text == null) throw new ArgumentNullException(nameof(text));
+            if (key == null) throw new ArgumentNullException(nameof(key));
             var keyRegex = new Regex(string.Format(@"(?m)^({0})[ \t]*=[ \t]*([^\r\n]*?)[ \t]*(?=\r?$)", Regex.Escape(key)));
             if (keyRegex.IsMatch(text))
             {

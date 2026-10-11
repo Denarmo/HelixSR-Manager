@@ -28,7 +28,7 @@ taskkill /F /IM HelixSR-Manager.exe /T >nul 2>&1
   /r:"%WPFDIR%\PresentationFramework.dll" ^
   /r:"%WPFDIR%\PresentationCore.dll" ^
   /r:"%WPFDIR%\WindowsBase.dll" ^
-  src\Models.cs src\Engine.cs src\MainWindow.cs src\Program.cs
+  src\IEnvironmentSettings.cs src\DefaultEnvironmentSettings.cs src\Models.cs src\Engine.cs src\MainWindow.cs src\Program.cs
 
 if %errorlevel% neq 0 (
     echo [ERROR] Compilation failed.

@@ -46,19 +46,13 @@ namespace HelixSRSwapper
 
         private static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
 
-        public static bool IsRunningOnWineOrLinux()
+        public static bool IsRunningOnWineOrLinux(IEnvironmentSettings env = null)
         {
-            if (Environment.OSVersion.Platform == PlatformID.Unix || Environment.OSVersion.Platform == PlatformID.MacOSX)
+            env = env ?? new DefaultEnvironmentSettings();
+            if (env.OSPlatform == PlatformID.Unix || env.OSPlatform == PlatformID.MacOSX)
                 return true;
-            try
-            {
-                using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Wine"))
-                {
-                    if (k != null) return true;
-                }
-            }
-            catch { }
-            return Directory.Exists(@"Z:\home") || Directory.Exists("/home");
+            if (env.HasWineRegistryKey) return true;
+            return env.DirectoryExists(@"Z:\home") || env.DirectoryExists("/home");
         }
 
         public static string NormalizePath(string path)

@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -1335,7 +1334,7 @@ namespace HelixSRSwapper
 
                 if (File.Exists(zipPath) && new FileInfo(zipPath).Length > 100000)
                 {
-                    using (var archive = ZipFile.OpenRead(zipPath))
+                    using (var archive = System.IO.Compression.ZipFile.OpenRead(zipPath))
                     {
                         foreach (var entry in archive.Entries)
                         {

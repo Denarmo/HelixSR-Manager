@@ -141,13 +141,17 @@ namespace HelixSRSwapper
                 if (!Directory.Exists(mr)) continue;
                 try
                 {
-                    foreach (var d1 in Directory.GetDirectories(mr))
+                    foreach (var d1 in Directory.EnumerateDirectories(mr))
                     {
                         if (Directory.Exists(Path.Combine(d1, "steamapps"))) AddUniqueDir(roots, seen, d1);
-                        foreach (var d2 in Directory.GetDirectories(d1))
+                        try
                         {
-                            if (Directory.Exists(Path.Combine(d2, "steamapps"))) AddUniqueDir(roots, seen, d2);
+                            foreach (var d2 in Directory.EnumerateDirectories(d1))
+                            {
+                                if (Directory.Exists(Path.Combine(d2, "steamapps"))) AddUniqueDir(roots, seen, d2);
+                            }
                         }
+                        catch { }
                     }
                 }
                 catch { }
@@ -502,7 +506,7 @@ namespace HelixSRSwapper
 
                 if (depth < maxDepth)
                 {
-                    foreach (var d in Directory.GetDirectories(dir))
+                    foreach (var d in Directory.EnumerateDirectories(dir))
                     {
                         string dname = Path.GetFileName(d);
                         if (!string.Equals(dname, HelixSrFolder, StringComparison.OrdinalIgnoreCase))
@@ -528,7 +532,7 @@ namespace HelixSRSwapper
                 if (string.IsNullOrEmpty(normLib) || !Directory.Exists(normLib)) continue;
                 try
                 {
-                    foreach (var dir in Directory.GetDirectories(normLib))
+                    foreach (var dir in Directory.EnumerateDirectories(normLib))
                     {
                         string normDir = NormalizePath(dir);
                         if (string.IsNullOrEmpty(normDir) || !scanned.Add(normDir)) continue;

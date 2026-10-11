@@ -164,6 +164,9 @@ def get_steam_roots():
     return roots
 
 
+
+VDF_PATH_REGEX = re.compile(r'"path"\s+"([^"]+)"')
+
 def get_steam_libraries():
     libs = []
     seen = set()
@@ -180,7 +183,7 @@ def get_steam_libraries():
             try:
                 with open(vdf, "r", encoding="utf-8", errors="ignore") as f:
                     text = f.read()
-                for m in re.finditer(r'"path"\s+"([^"]+)"', text):
+                for m in VDF_PATH_REGEX.finditer(text):
                     p = normalize_path(m.group(1).replace("\\\\", "\\"))
                     common = normalize_path(os.path.join(p, "steamapps", "common"))
                     if os.path.isdir(common):

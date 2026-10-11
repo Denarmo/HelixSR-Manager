@@ -63,7 +63,7 @@ namespace HelixSRSwapper
 
         public static string NormalizePath(string path)
         {
-            if (string.IsNullOrEmpty(path)) return "";
+            if (string.IsNullOrWhiteSpace(path)) return "";
             try
             {
                 string cleaned = path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);

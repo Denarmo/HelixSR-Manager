@@ -615,315 +615,11 @@ namespace HelixSRSwapper
 
             if (game.Route == "optiscaler")
             {
-                string t = game.ExeFolder ?? game.Folder;
-                if (!Directory.Exists(t)) throw new DirectoryNotFoundException("Game executable directory not found.");
-
-                string helixDir = Path.Combine(t, HelixSrFolder);
-                string backupDir = Path.Combine(helixDir, BackupFolder);
-                string markerPath = Path.Combine(helixDir, MarkerFile);
-
-                Directory.CreateDirectory(helixDir);
-                Directory.CreateDirectory(backupDir);
-
-                var rec = new Dictionary<string, object>();
-                var movedList = new List<string>();
-                var createdList = new List<string>();
-
-                string optiName = !string.IsNullOrEmpty(game.OptiDllName) ? game.OptiDllName : "dxgi.dll";
-                string fgMode = !string.IsNullOrEmpty(game.FgMode) ? game.FgMode : "auto";
-                if (fgMode.StartsWith("dlssg_")) game.UseFakeNvapi = true;
-
-                rec["optiscaler"] = optiName;
-                rec["fakenvapi"] = game.UseFakeNvapi;
-                rec["fg_mode"] = fgMode;
-
-                // Backup existing wrapper DLL if present
-                string currentTarget = Path.Combine(t, optiName);
-                if (File.Exists(currentTarget))
-                {
-                    string backupTarget = Path.Combine(backupDir, optiName);
-                    if (!File.Exists(backupTarget))
-                    {
-                        File.Copy(currentTarget, backupTarget, true);
-                        movedList.Add(optiName);
-                    }
-                }
-
-                // Backup OptiScaler.ini if game already had one
-                string gameIni = Path.Combine(t, "OptiScaler.ini");
-                string srcIni = Path.Combine(CoreDir, "optiscaler", "OptiScaler.ini");
-                if (File.Exists(gameIni))
-                {
-                    string backupIni = Path.Combine(backupDir, "OptiScaler.ini");
-                    if (!File.Exists(backupIni))
-                    {
-                        File.Copy(gameIni, backupIni, true);
-                    }
-                    rec["ini"] = "edited";
-                }
-                else if (File.Exists(srcIni))
-                {
-                    File.Copy(srcIni, gameIni, true);
-                    rec["ini"] = "created";
-                }
-
-                // Ensure no stray fake nvapi64.dll is hijacking the graphics driver on Nvidia systems
-                string strayNvapi = Path.Combine(t, "nvapi64.dll");
-                if (File.Exists(strayNvapi)) { try { File.Delete(strayNvapi); } catch { } }
-
-                // Deploy fakenvapi.dll and fakenvapi.ini if enabled (for AMD/Intel GPUs via OptiScaler)
-                string dstFakenvapi = Path.Combine(t, "fakenvapi.dll");
-                string dstFakenvapiIni = Path.Combine(t, "fakenvapi.ini");
-                if (game.UseFakeNvapi)
-                {
-                    string srcFakenvapi = Path.Combine(CoreDir, "optiscaler", "fakenvapi.dll");
-                    string srcFakenvapiIni = Path.Combine(CoreDir, "optiscaler", "fakenvapi.ini");
-
-                    if (File.Exists(srcFakenvapi))
-                    {
-                        if (!File.Exists(dstFakenvapi)) createdList.Add("fakenvapi.dll");
-                        File.Copy(srcFakenvapi, dstFakenvapi, true);
-                    }
-
-                    if (File.Exists(srcFakenvapiIni))
-                    {
-                        if (!File.Exists(dstFakenvapiIni)) createdList.Add("fakenvapi.ini");
-                        File.Copy(srcFakenvapiIni, dstFakenvapiIni, true);
-                    }
-                }
-                else
-                {
-                    if (File.Exists(dstFakenvapi)) { try { File.Delete(dstFakenvapi); } catch { } }
-                    if (File.Exists(dstFakenvapiIni)) { try { File.Delete(dstFakenvapiIni); } catch { } }
-                }
-
-                // Copy OptiScaler.dll as the selected opti wrapper
-                string srcOptiDll = Path.Combine(CoreDir, "optiscaler", "OptiScaler.dll");
-                if (File.Exists(srcOptiDll))
-                {
-                    File.Copy(srcOptiDll, currentTarget, true);
-                }
-
-                // Copy HelixSR DLLs (helixsr.dll & helixsr_upscaler.dll)
-                string srcFfxDll = Path.Combine(CoreDir, DllFsr);
-                if (File.Exists(srcFfxDll))
-                {
-                    File.Copy(srcFfxDll, Path.Combine(helixDir, OwnDll), true);
-                    File.Copy(srcFfxDll, Path.Combine(helixDir, OwnSrDll), true);
-                }
-
-                // Copy Network Weights & Kernels
-                foreach (var net in NetworkFiles)
-                {
-                    string srcNet = Path.Combine(CoreDir, net);
-                    if (File.Exists(srcNet))
-                    {
-                        File.Copy(srcNet, Path.Combine(helixDir, net), true);
-                    }
-                }
-
-                // Create my-fsr folder
-                string myFsrDir = Path.Combine(helixDir, MyFsrFolder);
-                Directory.CreateDirectory(myFsrDir);
-                File.WriteAllText(Path.Combine(myFsrDir, "README.txt"), MyFsrReadme);
-
-                // Copy AMD fallback FSR
-                string srcAmdFsr = Path.Combine(CoreDir, "amd-fsr", DllSr);
-                if (File.Exists(srcAmdFsr))
-                {
-                    File.Copy(srcAmdFsr, Path.Combine(helixDir, AmdFsrFile), true);
-                }
-
-                // Copy optional Frame Generation DLLs from Core my-fsr or Game my-fsr if present
-                string coreMyFsr = Path.Combine(CoreDir, MyFsrFolder);
-                string[] fgOptFiles = new string[] { "amd_fidelityfx_framegeneration_dx12.dll", "libxess_fg.dll", "libxell.dll" };
-                foreach (var fgFile in fgOptFiles)
-                {
-                    string srcCoreFg = Path.Combine(coreMyFsr, fgFile);
-                    string srcGameFg = Path.Combine(myFsrDir, fgFile);
-                    string dstHelixFg = Path.Combine(helixDir, fgFile);
-                    if (File.Exists(srcGameFg)) File.Copy(srcGameFg, dstHelixFg, true);
-                    else if (File.Exists(srcCoreFg)) File.Copy(srcCoreFg, dstHelixFg, true);
-                }
-
-                // Copy dlssg_to_fsr3_amd_is_better.dll next to game exe if present in my-fsr
-                string nukemName = "dlssg_to_fsr3_amd_is_better.dll";
-                string srcNukemGame = Path.Combine(myFsrDir, nukemName);
-                string srcNukemCore = Path.Combine(coreMyFsr, nukemName);
-                string dstNukem = Path.Combine(t, nukemName);
-                if (File.Exists(srcNukemGame) || File.Exists(srcNukemCore))
-                {
-                    if (!File.Exists(dstNukem)) createdList.Add(nukemName);
-                    File.Copy(File.Exists(srcNukemGame) ? srcNukemGame : srcNukemCore, dstNukem, true);
-                }
-
-                // Mirror HelixSR files to _storage_ subfolder if game uses Capcom RE Engine / REFramework
-                string subStorage = Path.Combine(t, "_storage_");
-                if (Directory.Exists(subStorage))
-                {
-                    string subHelix = Path.Combine(subStorage, HelixSrFolder);
-                    Directory.CreateDirectory(subHelix);
-                    if (File.Exists(srcFfxDll))
-                    {
-                        File.Copy(srcFfxDll, Path.Combine(subHelix, OwnDll), true);
-                        File.Copy(srcFfxDll, Path.Combine(subHelix, OwnSrDll), true);
-                    }
-                    foreach (var net in NetworkFiles)
-                    {
-                        string srcNet = Path.Combine(CoreDir, net);
-                        if (File.Exists(srcNet)) File.Copy(srcNet, Path.Combine(subHelix, net), true);
-                    }
-                }
-
-                // Clear any broken/corrupted shader caches from previous crashes so game compiles fresh clean shaders
-                ClearShaderCache(game);
-
-                // Configure OptiScaler.ini with official HelixSR backend & Frame Generation settings
-                if (File.Exists(gameIni))
-                {
-                    string text = File.ReadAllText(gameIni);
-                    text = SetIniValue(text, "Dx12Upscaler", "fsr31", "Upscalers");
-                    text = SetIniValue(text, "FfxDx12Path", Path.Combine(helixDir, OwnDll), "Libraries");
-                    text = SetIniValue(text, "FfxDx12SRPath", Path.Combine(helixDir, OwnSrDll), "Libraries");
-
-                    // Decouple FfxDx12FGPath from HelixSR SR-only DLL so FidelityFX Frame Generation works simultaneously
-                    string ffxFgHelix = Path.Combine(helixDir, "amd_fidelityfx_framegeneration_dx12.dll");
-                    if (File.Exists(ffxFgHelix))
-                        text = SetIniValue(text, "FfxDx12FGPath", ffxFgHelix, "Libraries");
-                    else if (!string.IsNullOrEmpty(game.FoundFfxFgPath) && File.Exists(game.FoundFfxFgPath))
-                        text = SetIniValue(text, "FfxDx12FGPath", game.FoundFfxFgPath, "Libraries");
-
-                    string xeFgHelix = Path.Combine(helixDir, "libxess_fg.dll");
-                    if (File.Exists(xeFgHelix))
-                        text = SetIniValue(text, "XeFGPath", xeFgHelix, "Libraries");
-                    else if (!string.IsNullOrEmpty(game.FoundXeFgPath) && File.Exists(game.FoundXeFgPath))
-                        text = SetIniValue(text, "XeFGPath", game.FoundXeFgPath, "Libraries");
-
-                    string xeLlHelix = Path.Combine(helixDir, "libxell.dll");
-                    if (File.Exists(xeLlHelix))
-                        text = SetIniValue(text, "XeLLPath", xeLlHelix, "Libraries");
-                    else if (!string.IsNullOrEmpty(game.FoundXeLlPath) && File.Exists(game.FoundXeLlPath))
-                        text = SetIniValue(text, "XeLLPath", game.FoundXeLlPath, "Libraries");
-
-                    if (fgMode == "dlssg_xefg")
-                    {
-                        text = SetIniValue(text, "Enabled", "true", "FrameGen");
-                        text = SetIniValue(text, "FGInput", "dlssg", "FrameGen");
-                        text = SetIniValue(text, "FGOutput", "xefg", "FrameGen");
-                    }
-                    else if (fgMode == "dlssg_fsrfg")
-                    {
-                        text = SetIniValue(text, "Enabled", "true", "FrameGen");
-                        text = SetIniValue(text, "FGInput", "dlssg", "FrameGen");
-                        text = SetIniValue(text, "FGOutput", "fsrfg", "FrameGen");
-                    }
-                    else if (fgMode == "dlssg_nukems")
-                    {
-                        text = SetIniValue(text, "Enabled", "true", "FrameGen");
-                        text = SetIniValue(text, "FGInput", "nukems", "FrameGen");
-                        text = SetIniValue(text, "FGOutput", "nukems", "FrameGen");
-                    }
-                    else if (fgMode == "optifg_fsrfg")
-                    {
-                        text = SetIniValue(text, "Enabled", "true", "FrameGen");
-                        text = SetIniValue(text, "FGInput", "upscaler", "FrameGen");
-                        text = SetIniValue(text, "FGOutput", "fsrfg", "FrameGen");
-                        text = SetIniValue(text, "HUDFix", "true", "OptiFG");
-                    }
-                    else
-                    {
-                        text = SetIniValue(text, "Enabled", "auto", "FrameGen");
-                        text = SetIniValue(text, "FGInput", "auto", "FrameGen");
-                        text = SetIniValue(text, "FGOutput", "auto", "FrameGen");
-                    }
-
-                    File.WriteAllText(gameIni, text);
-                }
-
-                rec["moved"] = movedList;
-                rec["created"] = createdList;
-                rec["helixsr"] = "1.7.0";
-                rec["route"] = "optiscaler";
-
-                File.WriteAllText(markerPath, Json.Serialize(rec));
+                InstallOptiScalerRoute(game);
             }
             else if (game.Route == "direct")
             {
-                string t = game.ExeFolder ?? game.Folder;
-                string srcFfx = Path.Combine(CoreDir, DllFsr);
-
-                if (game.FsrTargets != null && game.FsrTargets.Count > 0)
-                {
-                    foreach (var target in game.FsrTargets)
-                    {
-                        string orig = Path.ChangeExtension(target, ".original.dll");
-                        if (File.Exists(target) && !File.Exists(orig))
-                        {
-                            File.Move(target, orig);
-                        }
-                        File.Copy(srcFfx, target, true);
-
-                        foreach (var net in NetworkFiles)
-                        {
-                            string srcNet = Path.Combine(CoreDir, net);
-                            if (File.Exists(srcNet))
-                            {
-                                File.Copy(srcNet, Path.Combine(Path.GetDirectoryName(target), net), true);
-                            }
-                        }
-
-                        string marker = Path.Combine(Path.GetDirectoryName(target), MarkerFile);
-                        var rec = new Dictionary<string, object>
-                        {
-                            { "helixsr", "1.7.0" },
-                            { "route", "direct" }
-                        };
-                        File.WriteAllText(marker, Json.Serialize(rec));
-                    }
-                }
-                else if (!string.IsNullOrEmpty(t) && Directory.Exists(t))
-                {
-                    // Standalone direct DLL drop into executable directory
-                    var createdDlls = new List<string>();
-                    foreach (var dllName in new string[] { DllSr, DllFsr })
-                    {
-                        string dst = Path.Combine(t, dllName);
-                        string orig = Path.ChangeExtension(dst, ".original.dll");
-                        if (File.Exists(dst) && !File.Exists(orig))
-                        {
-                            File.Move(dst, orig);
-                        }
-                        else if (!File.Exists(dst))
-                        {
-                            createdDlls.Add(dllName);
-                        }
-                        File.Copy(srcFfx, dst, true);
-                    }
-
-                    foreach (var net in NetworkFiles)
-                    {
-                        string srcNet = Path.Combine(CoreDir, net);
-                        if (File.Exists(srcNet))
-                        {
-                            File.Copy(srcNet, Path.Combine(t, net), true);
-                        }
-                    }
-
-                    string marker = Path.Combine(t, MarkerFile);
-                    var rec = new Dictionary<string, object>
-                    {
-                        { "helixsr", "1.7.0" },
-                        { "route", "direct" },
-                        { "created_dlls", createdDlls }
-                    };
-                    File.WriteAllText(marker, Json.Serialize(rec));
-                }
-
-                // Clear broken shader cache
-                ClearShaderCache(game);
-
-                // Sanitize Capcom RE Engine config.ini if present (reset stale foreign GPU adapter locks and DLSS reflex)
-                SanitizeGameConfig(game);
+                InstallDirectRoute(game);
             }
 
             if (game.InstallReFramework)
@@ -934,6 +630,323 @@ namespace HelixSRSwapper
             {
                 UninstallReFramework(game);
             }
+        }
+
+
+        private static void InstallOptiScalerRoute(GameInfo game)
+        {
+            string t = game.ExeFolder ?? game.Folder;
+            if (!Directory.Exists(t)) throw new DirectoryNotFoundException("Game executable directory not found.");
+
+            string helixDir = Path.Combine(t, HelixSrFolder);
+            string backupDir = Path.Combine(helixDir, BackupFolder);
+            string markerPath = Path.Combine(helixDir, MarkerFile);
+
+            Directory.CreateDirectory(helixDir);
+            Directory.CreateDirectory(backupDir);
+
+            var rec = new Dictionary<string, object>();
+            var movedList = new List<string>();
+            var createdList = new List<string>();
+
+            string optiName = !string.IsNullOrEmpty(game.OptiDllName) ? game.OptiDllName : "dxgi.dll";
+            string fgMode = !string.IsNullOrEmpty(game.FgMode) ? game.FgMode : "auto";
+            if (fgMode.StartsWith("dlssg_")) game.UseFakeNvapi = true;
+
+            rec["optiscaler"] = optiName;
+            rec["fakenvapi"] = game.UseFakeNvapi;
+            rec["fg_mode"] = fgMode;
+
+            // Backup existing wrapper DLL if present
+            string currentTarget = Path.Combine(t, optiName);
+            if (File.Exists(currentTarget))
+            {
+                string backupTarget = Path.Combine(backupDir, optiName);
+                if (!File.Exists(backupTarget))
+                {
+                    File.Copy(currentTarget, backupTarget, true);
+                    movedList.Add(optiName);
+                }
+            }
+
+            // Backup OptiScaler.ini if game already had one
+            string gameIni = Path.Combine(t, "OptiScaler.ini");
+            string srcIni = Path.Combine(CoreDir, "optiscaler", "OptiScaler.ini");
+            if (File.Exists(gameIni))
+            {
+                string backupIni = Path.Combine(backupDir, "OptiScaler.ini");
+                if (!File.Exists(backupIni))
+                {
+                    File.Copy(gameIni, backupIni, true);
+                }
+                rec["ini"] = "edited";
+            }
+            else if (File.Exists(srcIni))
+            {
+                File.Copy(srcIni, gameIni, true);
+                rec["ini"] = "created";
+            }
+
+            // Ensure no stray fake nvapi64.dll is hijacking the graphics driver on Nvidia systems
+            string strayNvapi = Path.Combine(t, "nvapi64.dll");
+            if (File.Exists(strayNvapi)) { try { File.Delete(strayNvapi); } catch { } }
+
+            // Deploy fakenvapi.dll and fakenvapi.ini if enabled (for AMD/Intel GPUs via OptiScaler)
+            string dstFakenvapi = Path.Combine(t, "fakenvapi.dll");
+            string dstFakenvapiIni = Path.Combine(t, "fakenvapi.ini");
+            if (game.UseFakeNvapi)
+            {
+                string srcFakenvapi = Path.Combine(CoreDir, "optiscaler", "fakenvapi.dll");
+                string srcFakenvapiIni = Path.Combine(CoreDir, "optiscaler", "fakenvapi.ini");
+
+                if (File.Exists(srcFakenvapi))
+                {
+                    if (!File.Exists(dstFakenvapi)) createdList.Add("fakenvapi.dll");
+                    File.Copy(srcFakenvapi, dstFakenvapi, true);
+                }
+
+                if (File.Exists(srcFakenvapiIni))
+                {
+                    if (!File.Exists(dstFakenvapiIni)) createdList.Add("fakenvapi.ini");
+                    File.Copy(srcFakenvapiIni, dstFakenvapiIni, true);
+                }
+            }
+            else
+            {
+                if (File.Exists(dstFakenvapi)) { try { File.Delete(dstFakenvapi); } catch { } }
+                if (File.Exists(dstFakenvapiIni)) { try { File.Delete(dstFakenvapiIni); } catch { } }
+            }
+
+            // Copy OptiScaler.dll as the selected opti wrapper
+            string srcOptiDll = Path.Combine(CoreDir, "optiscaler", "OptiScaler.dll");
+            if (File.Exists(srcOptiDll))
+            {
+                File.Copy(srcOptiDll, currentTarget, true);
+            }
+
+            // Copy HelixSR DLLs (helixsr.dll & helixsr_upscaler.dll)
+            string srcFfxDll = Path.Combine(CoreDir, DllFsr);
+            if (File.Exists(srcFfxDll))
+            {
+                File.Copy(srcFfxDll, Path.Combine(helixDir, OwnDll), true);
+                File.Copy(srcFfxDll, Path.Combine(helixDir, OwnSrDll), true);
+            }
+
+            // Copy Network Weights & Kernels
+            foreach (var net in NetworkFiles)
+            {
+                string srcNet = Path.Combine(CoreDir, net);
+                if (File.Exists(srcNet))
+                {
+                    File.Copy(srcNet, Path.Combine(helixDir, net), true);
+                }
+            }
+
+            // Create my-fsr folder
+            string myFsrDir = Path.Combine(helixDir, MyFsrFolder);
+            Directory.CreateDirectory(myFsrDir);
+            File.WriteAllText(Path.Combine(myFsrDir, "README.txt"), MyFsrReadme);
+
+            // Copy AMD fallback FSR
+            string srcAmdFsr = Path.Combine(CoreDir, "amd-fsr", DllSr);
+            if (File.Exists(srcAmdFsr))
+            {
+                File.Copy(srcAmdFsr, Path.Combine(helixDir, AmdFsrFile), true);
+            }
+
+            // Copy optional Frame Generation DLLs from Core my-fsr or Game my-fsr if present
+            string coreMyFsr = Path.Combine(CoreDir, MyFsrFolder);
+            string[] fgOptFiles = new string[] { "amd_fidelityfx_framegeneration_dx12.dll", "libxess_fg.dll", "libxell.dll" };
+            foreach (var fgFile in fgOptFiles)
+            {
+                string srcCoreFg = Path.Combine(coreMyFsr, fgFile);
+                string srcGameFg = Path.Combine(myFsrDir, fgFile);
+                string dstHelixFg = Path.Combine(helixDir, fgFile);
+                if (File.Exists(srcGameFg)) File.Copy(srcGameFg, dstHelixFg, true);
+                else if (File.Exists(srcCoreFg)) File.Copy(srcCoreFg, dstHelixFg, true);
+            }
+
+            // Copy dlssg_to_fsr3_amd_is_better.dll next to game exe if present in my-fsr
+            string nukemName = "dlssg_to_fsr3_amd_is_better.dll";
+            string srcNukemGame = Path.Combine(myFsrDir, nukemName);
+            string srcNukemCore = Path.Combine(coreMyFsr, nukemName);
+            string dstNukem = Path.Combine(t, nukemName);
+            if (File.Exists(srcNukemGame) || File.Exists(srcNukemCore))
+            {
+                if (!File.Exists(dstNukem)) createdList.Add(nukemName);
+                File.Copy(File.Exists(srcNukemGame) ? srcNukemGame : srcNukemCore, dstNukem, true);
+            }
+
+            // Mirror HelixSR files to _storage_ subfolder if game uses Capcom RE Engine / REFramework
+            string subStorage = Path.Combine(t, "_storage_");
+            if (Directory.Exists(subStorage))
+            {
+                string subHelix = Path.Combine(subStorage, HelixSrFolder);
+                Directory.CreateDirectory(subHelix);
+                if (File.Exists(srcFfxDll))
+                {
+                    File.Copy(srcFfxDll, Path.Combine(subHelix, OwnDll), true);
+                    File.Copy(srcFfxDll, Path.Combine(subHelix, OwnSrDll), true);
+                }
+                foreach (var net in NetworkFiles)
+                {
+                    string srcNet = Path.Combine(CoreDir, net);
+                    if (File.Exists(srcNet)) File.Copy(srcNet, Path.Combine(subHelix, net), true);
+                }
+            }
+
+            // Clear any broken/corrupted shader caches from previous crashes so game compiles fresh clean shaders
+            ClearShaderCache(game);
+
+            // Configure OptiScaler.ini with official HelixSR backend & Frame Generation settings
+            if (File.Exists(gameIni))
+            {
+                string text = File.ReadAllText(gameIni);
+                text = SetIniValue(text, "Dx12Upscaler", "fsr31", "Upscalers");
+                text = SetIniValue(text, "FfxDx12Path", Path.Combine(helixDir, OwnDll), "Libraries");
+                text = SetIniValue(text, "FfxDx12SRPath", Path.Combine(helixDir, OwnSrDll), "Libraries");
+
+                // Decouple FfxDx12FGPath from HelixSR SR-only DLL so FidelityFX Frame Generation works simultaneously
+                string ffxFgHelix = Path.Combine(helixDir, "amd_fidelityfx_framegeneration_dx12.dll");
+                if (File.Exists(ffxFgHelix))
+                    text = SetIniValue(text, "FfxDx12FGPath", ffxFgHelix, "Libraries");
+                else if (!string.IsNullOrEmpty(game.FoundFfxFgPath) && File.Exists(game.FoundFfxFgPath))
+                    text = SetIniValue(text, "FfxDx12FGPath", game.FoundFfxFgPath, "Libraries");
+
+                string xeFgHelix = Path.Combine(helixDir, "libxess_fg.dll");
+                if (File.Exists(xeFgHelix))
+                    text = SetIniValue(text, "XeFGPath", xeFgHelix, "Libraries");
+                else if (!string.IsNullOrEmpty(game.FoundXeFgPath) && File.Exists(game.FoundXeFgPath))
+                    text = SetIniValue(text, "XeFGPath", game.FoundXeFgPath, "Libraries");
+
+                string xeLlHelix = Path.Combine(helixDir, "libxell.dll");
+                if (File.Exists(xeLlHelix))
+                    text = SetIniValue(text, "XeLLPath", xeLlHelix, "Libraries");
+                else if (!string.IsNullOrEmpty(game.FoundXeLlPath) && File.Exists(game.FoundXeLlPath))
+                    text = SetIniValue(text, "XeLLPath", game.FoundXeLlPath, "Libraries");
+
+                if (fgMode == "dlssg_xefg")
+                {
+                    text = SetIniValue(text, "Enabled", "true", "FrameGen");
+                    text = SetIniValue(text, "FGInput", "dlssg", "FrameGen");
+                    text = SetIniValue(text, "FGOutput", "xefg", "FrameGen");
+                }
+                else if (fgMode == "dlssg_fsrfg")
+                {
+                    text = SetIniValue(text, "Enabled", "true", "FrameGen");
+                    text = SetIniValue(text, "FGInput", "dlssg", "FrameGen");
+                    text = SetIniValue(text, "FGOutput", "fsrfg", "FrameGen");
+                }
+                else if (fgMode == "dlssg_nukems")
+                {
+                    text = SetIniValue(text, "Enabled", "true", "FrameGen");
+                    text = SetIniValue(text, "FGInput", "nukems", "FrameGen");
+                    text = SetIniValue(text, "FGOutput", "nukems", "FrameGen");
+                }
+                else if (fgMode == "optifg_fsrfg")
+                {
+                    text = SetIniValue(text, "Enabled", "true", "FrameGen");
+                    text = SetIniValue(text, "FGInput", "upscaler", "FrameGen");
+                    text = SetIniValue(text, "FGOutput", "fsrfg", "FrameGen");
+                    text = SetIniValue(text, "HUDFix", "true", "OptiFG");
+                }
+                else
+                {
+                    text = SetIniValue(text, "Enabled", "auto", "FrameGen");
+                    text = SetIniValue(text, "FGInput", "auto", "FrameGen");
+                    text = SetIniValue(text, "FGOutput", "auto", "FrameGen");
+                }
+
+                File.WriteAllText(gameIni, text);
+            }
+
+            rec["moved"] = movedList;
+            rec["created"] = createdList;
+            rec["helixsr"] = "1.7.0";
+            rec["route"] = "optiscaler";
+
+            File.WriteAllText(markerPath, Json.Serialize(rec));
+
+        }
+
+        private static void InstallDirectRoute(GameInfo game)
+        {
+            string t = game.ExeFolder ?? game.Folder;
+            string srcFfx = Path.Combine(CoreDir, DllFsr);
+
+            if (game.FsrTargets != null && game.FsrTargets.Count > 0)
+            {
+                foreach (var target in game.FsrTargets)
+                {
+                    string orig = Path.ChangeExtension(target, ".original.dll");
+                    if (File.Exists(target) && !File.Exists(orig))
+                    {
+                        File.Move(target, orig);
+                    }
+                    File.Copy(srcFfx, target, true);
+
+                    foreach (var net in NetworkFiles)
+                    {
+                        string srcNet = Path.Combine(CoreDir, net);
+                        if (File.Exists(srcNet))
+                        {
+                            File.Copy(srcNet, Path.Combine(Path.GetDirectoryName(target), net), true);
+                        }
+                    }
+
+                    string marker = Path.Combine(Path.GetDirectoryName(target), MarkerFile);
+                    var rec = new Dictionary<string, object>
+                    {
+                        { "helixsr", "1.7.0" },
+                        { "route", "direct" }
+                    };
+                    File.WriteAllText(marker, Json.Serialize(rec));
+                }
+            }
+            else if (!string.IsNullOrEmpty(t) && Directory.Exists(t))
+            {
+                // Standalone direct DLL drop into executable directory
+                var createdDlls = new List<string>();
+                foreach (var dllName in new string[] { DllSr, DllFsr })
+                {
+                    string dst = Path.Combine(t, dllName);
+                    string orig = Path.ChangeExtension(dst, ".original.dll");
+                    if (File.Exists(dst) && !File.Exists(orig))
+                    {
+                        File.Move(dst, orig);
+                    }
+                    else if (!File.Exists(dst))
+                    {
+                        createdDlls.Add(dllName);
+                    }
+                    File.Copy(srcFfx, dst, true);
+                }
+
+                foreach (var net in NetworkFiles)
+                {
+                    string srcNet = Path.Combine(CoreDir, net);
+                    if (File.Exists(srcNet))
+                    {
+                        File.Copy(srcNet, Path.Combine(t, net), true);
+                    }
+                }
+
+                string marker = Path.Combine(t, MarkerFile);
+                var rec = new Dictionary<string, object>
+                {
+                    { "helixsr", "1.7.0" },
+                    { "route", "direct" },
+                    { "created_dlls", createdDlls }
+                };
+                File.WriteAllText(marker, Json.Serialize(rec));
+            }
+
+            // Clear broken shader cache
+            ClearShaderCache(game);
+
+            // Sanitize Capcom RE Engine config.ini if present (reset stale foreign GPU adapter locks and DLSS reflex)
+            SanitizeGameConfig(game);
+
         }
 
         private static void CleanupHelixSRFiles(GameInfo game)

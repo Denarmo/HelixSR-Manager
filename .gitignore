@@ -18,3 +18,4 @@ config.json
 *.pyc
 *.log
 node_modules/
+coverage/

@@ -28,47 +28,49 @@ AGGREGATED THIRD-PARTY COMPONENTS & SEPARATE LICENSES
 ================================================================================
 
 This repository and its release distributions aggregate unmodified third-party
-software inside `helixsr_core/HelixSR-1.7.0/`. Each component remains the
+software inside `helixsr_core/HelixSR-1.8.1/`. Each component remains the
 property of its respective copyright holder(s) and is governed strictly by its
 own license:
 
-1. HelixSR Core Runtime (`helixsr_core/HelixSR-1.7.0/amd_fidelityfx_dx12.dll`)
+1. HelixSR Core Runtime (`helixsr_core/HelixSR-1.8.1/amd_fidelityfx_dx12.dll`) and the
+   experimental HelixSR DLSS loader (`helixsr_core/HelixSR-1.8.1/dlss-loader/dxgi.dll`)
    - Copyright (c) 2026 lonewolf0622. All rights reserved.
    - Governed by the HelixSR Freeware License:
-     `helixsr_core/HelixSR-1.7.0/LICENSE`
+     `helixsr_core/HelixSR-1.8.1/LICENSE`
    - Redistributed complete, unmodified, and free of charge in accordance with
      Section 2 of the HelixSR Freeware License.
    - Upstream project: https://github.com/lonewolf0622/HelixSR
 
-2. HelixSR Setup & Compiler Scripts (`helixsr_core/HelixSR-1.7.0/setup/`,
-   `helixsr-setup.ps1`, `helixsr-setup.sh`)
+2. HelixSR Setup & Compiler Scripts (`helixsr_core/HelixSR-1.8.1/setup/`,
+   `helixsr-setup.*`, `helixsr-uninstall.*`)
    - Copyright (c) 2026 lonewolf0622.
    - Licensed under the Apache License, Version 2.0:
-     `helixsr_core/HelixSR-1.7.0/LICENSE-APACHE-2.0`
+     `helixsr_core/HelixSR-1.8.1/LICENSE-APACHE-2.0`
 
-3. OptiScaler (`helixsr_core/HelixSR-1.7.0/optiscaler/OptiScaler.dll`,
+3. OptiScaler (`helixsr_core/HelixSR-1.8.1/optiscaler/OptiScaler.dll`,
    `OptiScaler.ini`)
    - Unmodified official release v0.9.4.
    - Licensed under the GNU General Public License v3.0 (GPL-3.0):
-     `helixsr_core/HelixSR-1.7.0/optiscaler/LICENSE-GPL-3.0.txt`
+     `helixsr_core/HelixSR-1.8.1/optiscaler/LICENSE-GPL-3.0.txt`
    - OptiScaler is distributed as an independent, separate program (mere
      aggregation). Neither HelixSR nor HelixSR Manager is linked with or
      derivative of OptiScaler.
    - Upstream project: https://github.com/OptiScaler/OptiScaler
 
-4. fakenvapi (`helixsr_core/HelixSR-1.7.0/optiscaler/fakenvapi.dll`,
+4. fakenvapi (`helixsr_core/HelixSR-1.8.1/optiscaler/fakenvapi.dll`,
    `fakenvapi.ini`)
    - Unmodified official release by FakeMichau.
    - Licensed under the MIT License:
-     `helixsr_core/HelixSR-1.7.0/optiscaler/fakenvapi-LICENSE.txt`
+     `helixsr_core/HelixSR-1.8.1/optiscaler/fakenvapi-LICENSE.txt`
    - Upstream project: https://github.com/FakeMichau/fakenvapi
 
-5. AMD FidelityFX Upscaler (`helixsr_core/HelixSR-1.7.0/amd-fsr/amd_fidelityfx_upscaler_dx12.dll`)
+5. AMD FidelityFX Upscaler & Frame Generation (`helixsr_core/HelixSR-1.8.1/amd-fsr/amd_fidelityfx_upscaler_dx12.dll`,
+   `amd_fidelityfx_framegeneration_dx12.dll`)
    - Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-   - Unmodified binary v4.1.1 redistributed under the AMD FidelityFX License:
-     `helixsr_core/HelixSR-1.7.0/amd-fsr/FidelityFX_v2_LICENSE.md`
+   - Unmodified binaries v4.1.1 redistributed under the AMD FidelityFX License:
+     `helixsr_core/HelixSR-1.8.1/amd-fsr/FidelityFX_v2_LICENSE.md`
    - AMD FidelityFX Lanczos weight approximation routines under the MIT License:
-     `helixsr_core/HelixSR-1.7.0/THIRD_PARTY_NOTICES.md`
+     `helixsr_core/HelixSR-1.8.1/THIRD_PARTY_NOTICES.md`
 
 6. NVIDIA DLSS Material (NOT INCLUDED)
    - Neither this repository nor its release packages include NVIDIA's DLSS

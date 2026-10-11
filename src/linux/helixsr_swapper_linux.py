@@ -27,9 +27,12 @@ PUBLIC_DIR = os.path.join(APP_DIR, "public")
 if not os.path.isdir(PUBLIC_DIR):
     PUBLIC_DIR = os.path.abspath(os.path.join(APP_DIR, "..", "..", "public"))
 
-CORE_DIR = os.path.join(APP_DIR, "helixsr_core", "HelixSR-1.7.0")
+APP_VERSION = "1.9.0"   # HelixSR Manager release
+CORE_VERSION = "1.8.1"  # bundled upstream HelixSR core (helixsr_core/HelixSR-x.y.z)
+
+CORE_DIR = os.path.join(APP_DIR, "helixsr_core", f"HelixSR-{CORE_VERSION}")
 if not os.path.isdir(CORE_DIR):
-    CORE_DIR = os.path.abspath(os.path.join(APP_DIR, "..", "..", "helixsr_core", "HelixSR-1.7.0"))
+    CORE_DIR = os.path.abspath(os.path.join(APP_DIR, "..", "..", "helixsr_core", f"HelixSR-{CORE_VERSION}"))
 
 CONFIG_FILE = os.path.join(APP_DIR, "config.json")
 
@@ -43,7 +46,13 @@ MARKER_FILE = "helixsr-install.json"
 BACKUP_FOLDER = "backup"
 OPTI_NAMES = ["dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll", "d3d12.dll", "wininet.dll", "winhttp.dll", "OptiScaler.asi"]
 AMD_FSR_FILE = "amd_fidelityfx_upscaler_dx12.amd.dll"
+AMD_FG_FILE = "amd_fidelityfx_framegeneration_dx12.dll"  # bundled in core/amd-fsr since HelixSR 1.8.0
 MY_FSR_FOLDER = "my-fsr"
+# Experimental route (HelixSR 1.8.1): HelixSR DLSS loader (dxgi.dll) + HelixSR as nvngx.dll next to the game's .exe
+LOADER_FOLDER = "dlss-loader"
+LOADER_DLL = "dxgi.dll"
+NVNGX_CORE_DLL = "nvngx.dll"
+EMBED_MAGIC = b"HXSRNET1"  # HelixSR 1.8+ appends the network to amd_fidelityfx_dx12.dll (one-file DLL)
 
 MY_FSR_README = """Put an FSR upscaler DLL into this folder (for example FSR 4: amd_fidelityfx_upscaler_dx12.dll, any
 file name) and start the game again. Only for this game.
@@ -71,6 +80,88 @@ BUILD_LOGS = []
 IS_BUILDING = False
 BUILD_LISTENERS = []
 BUILD_LOCK = threading.Lock()
+
+
+def read_embedded_network(dll_path):
+    """HelixSR 1.8+: returns (weights_size, kernels_size) if the network is appended to the DLL, else None.
+    Trailer (last 32 bytes): b"HXSRNET1" + u64 weights + u64 kernels + u64 reserved."""
+    try:
+        size = os.path.getsize(dll_path)
+        if size < 32:
+            return None
+        with open(dll_path, "rb") as f:
+            f.seek(size - 32)
+            tail = f.read(32)
+        if tail[:8] != EMBED_MAGIC:
+            return None
+        nw = int.from_bytes(tail[8:16], "little")
+        nk = int.from_bytes(tail[16:24], "little")
+        if nw <= 0 or nk <= 0 or nw + nk + 32 > size:
+            return None
+        return nw, nk
+    except Exception:
+        return None
+
+
+def has_embedded_network(dll_path=None):
+    return read_embedded_network(dll_path or os.path.join(CORE_DIR, DLL_FSR)) is not None
+
+
+def core_has_separate_network_files():
+    return all(os.path.isfile(os.path.join(CORE_DIR, f)) for f in NETWORK_FILES)
+
+
+def sync_network_files(dest_dir):
+    """Copy the legacy network files only when the core DLL does not carry the network itself;
+    otherwise remove stale copies from older builds."""
+    embedded = has_embedded_network()
+    for f in NETWORK_FILES:
+        src = os.path.join(CORE_DIR, f)
+        dst = os.path.join(dest_dir, f)
+        try:
+            if not embedded and os.path.isfile(src):
+                shutil.copy2(src, dst)
+            elif embedded and os.path.isfile(dst):
+                os.remove(dst)
+        except Exception:
+            pass
+
+
+def file_contains_ascii(path, pattern, limit):
+    try:
+        with open(path, "rb") as f:
+            data = f.read(limit)
+        if isinstance(pattern, re.Pattern):
+            return pattern.search(data) is not None
+        return pattern.encode("ascii") in data
+    except Exception:
+        return False
+
+
+HELIXSR_VERSION_RE = re.compile(rb"HelixSR \d+\.\d+\.\d+")
+
+
+def is_helixsr_binary(path):
+    return os.path.isfile(path) and file_contains_ascii(path, HELIXSR_VERSION_RE, 4 * 1024 * 1024)
+
+
+def is_dlss_loader_binary(path):
+    return os.path.isfile(path) and file_contains_ascii(path, "HelixSR DLSS loader", 1024 * 1024)
+
+
+def dlss_loader_available():
+    return os.path.isfile(os.path.join(CORE_DIR, LOADER_FOLDER, LOADER_DLL))
+
+
+def update_marker_version(marker_path):
+    try:
+        with open(marker_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data["helixsr"] = CORE_VERSION
+        with open(marker_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
 
 
 def get_data_dir():
@@ -287,6 +378,8 @@ def compute_proton_launch_option(route, opti_dll, install_reframework):
         opti = opti_dll or "dxgi.dll"
         if opti.lower().endswith(".dll"):
             dlls.append(opti[:-4])
+    elif route == "dlss":
+        dlls.append(LOADER_DLL[:-4])
     if install_reframework:
         if "dinput8" not in dlls:
             dlls.append("dinput8")
@@ -334,7 +427,9 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
             elif os.path.isdir(full) and e.lower() != HELIXSR_FOLDER.lower():
                 subdirs.append(full)
 
-        has_opti_marker = any(f.lower() == "optiscaler.ini" for f in files)
+        has_opti_marker = any(f.lower() == "optiscaler.ini" for f in files) or os.path.isfile(
+            os.path.join(curr_dir, HELIXSR_FOLDER, MARKER_FILE)
+        )
         if has_opti_marker:
             best_exe_dir = curr_dir
             best_exe_size = 10**15
@@ -397,6 +492,7 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
     has_logs = False
     has_myfsr = False
 
+    dlss_installed = False
     helix_dir = os.path.join(exe_folder, HELIXSR_FOLDER)
     marker_path = os.path.join(helix_dir, MARKER_FILE)
     if os.path.isfile(marker_path):
@@ -404,20 +500,28 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
         try:
             with open(marker_path, "r", encoding="utf-8") as f:
                 mdata = json.load(f)
-            version = mdata.get("helixsr", "1.7.0")
+            version = mdata.get("helixsr", CORE_VERSION)
             if mdata.get("optiscaler"):
                 opti_dll_name = mdata["optiscaler"]
             if "fakenvapi" in mdata:
                 use_fakenvapi = bool(mdata["fakenvapi"])
             if mdata.get("fg_mode"):
                 fg_mode = mdata["fg_mode"]
+            if mdata.get("route") == "dlss":
+                dlss_installed = True
+                opti_installed = False
         except Exception:
-            version = "1.7.0"
+            version = CORE_VERSION
 
     backup_dir = os.path.join(helix_dir, BACKUP_FOLDER)
     if os.path.isdir(backup_dir) and len(os.listdir(backup_dir)) > 0:
         has_backups = True
-    if os.path.isfile(os.path.join(helix_dir, "helixsr.log")) or os.path.isfile(os.path.join(exe_folder, "OptiScaler.log")):
+    if any(os.path.isfile(p) for p in (
+        os.path.join(helix_dir, "helixsr.log"),
+        os.path.join(exe_folder, "OptiScaler.log"),
+        os.path.join(exe_folder, "helixsr.log"),
+        os.path.join(exe_folder, "helixsr_loader.log"),
+    )):
         has_logs = True
     if os.path.isdir(os.path.join(helix_dir, MY_FSR_FOLDER)):
         has_myfsr = True
@@ -433,9 +537,9 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
                 try:
                     with open(t_marker, "r", encoding="utf-8") as f:
                         mdata = json.load(f)
-                    version = mdata.get("helixsr", "1.7.0")
+                    version = mdata.get("helixsr", CORE_VERSION)
                 except Exception:
-                    version = "1.7.0"
+                    version = CORE_VERSION
             if os.path.isfile(os.path.join(os.path.dirname(target), "helixsr.log")):
                 has_logs = True
 
@@ -445,11 +549,14 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
         try:
             with open(exe_marker, "r", encoding="utf-8") as f:
                 mdata = json.load(f)
-            version = mdata.get("helixsr", "1.7.0")
+            version = mdata.get("helixsr", CORE_VERSION)
         except Exception:
-            version = "1.7.0"
+            version = CORE_VERSION
 
-    if opti_installed:
+    if dlss_installed:
+        route = "dlss"
+        installed = True
+    elif opti_installed:
         route = "optiscaler"
         installed = True
     elif direct_installed:
@@ -475,9 +582,14 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
         }
         fg_tag = fg_map.get(fg_mode, "")
 
-    route_display = (
-        f"OptiScaler ({opti_dll_name}{fg_tag})" if route == "optiscaler" else ("Direct (FSR 3.1)" if route == "direct" else "Unsupported")
-    )
+    if route == "optiscaler":
+        route_display = f"OptiScaler ({opti_dll_name}{fg_tag})"
+    elif route == "direct":
+        route_display = "Direct (FSR 3.1)"
+    elif route == "dlss":
+        route_display = "DLSS Loader (Experimental)"
+    else:
+        route_display = "Unsupported"
 
     return {
         "id": base64.b64encode(game_folder.encode("utf-8")).decode("ascii").rstrip("="),
@@ -561,8 +673,12 @@ def get_core_status():
     core_exists = os.path.isdir(CORE_DIR)
     w_path = os.path.join(CORE_DIR, "helixsr_weights.bin")
     k_path = os.path.join(CORE_DIR, "helixsr_kernels.pak")
+    dll_path = os.path.join(CORE_DIR, DLL_FSR)
     w_built = os.path.isfile(w_path) and os.path.getsize(w_path) > 0
     k_built = os.path.isfile(k_path) and os.path.getsize(k_path) > 0
+    embedded = read_embedded_network(dll_path)
+    w_size = embedded[0] if embedded else (os.path.getsize(w_path) if w_built else 0)
+    k_size = embedded[1] if embedded else (os.path.getsize(k_path) if k_built else 0)
 
     data_dir = get_data_dir()
     if os.name == "nt":
@@ -573,13 +689,17 @@ def get_core_status():
         has_dxc = os.path.isfile(os.path.join(data_dir, "dxc-win", "bin", "x64", "dxc.exe"))
 
     return {
-        "version": "1.7.0",
+        "version": CORE_VERSION,
+        "appVersion": APP_VERSION,
         "platform": platform.system(),
         "coreDir": CORE_DIR,
         "coreExists": core_exists,
-        "weightsBuilt": w_built and k_built,
-        "weightsSize": os.path.getsize(w_path) if w_built else 0,
-        "kernelsSize": os.path.getsize(k_path) if k_built else 0,
+        "weightsBuilt": embedded is not None or (w_built and k_built),
+        "networkEmbedded": embedded is not None,
+        "weightsSize": w_size,
+        "kernelsSize": k_size,
+        "dllSize": os.path.getsize(dll_path) if os.path.isfile(dll_path) else 0,
+        "dlssLoaderAvailable": dlss_loader_available(),
         "hasPython": has_py,
         "hasDxc": has_dxc,
     }
@@ -588,7 +708,7 @@ def get_core_status():
 def set_ini_value(text, key, value, section):
     pattern = re.compile(rf"(?m)^({re.escape(key)})[ \t]*=[ \t]*([^\r\n]*?)[ \t]*(?=\r?$)")
     if pattern.search(text):
-        return pattern.sub(f"{key} = {value}", text, count=1)
+        return pattern.sub(lambda _m: f"{key} = {value}", text, count=1)
     if section:
         sec_re = re.compile(rf"(?m)^\[{re.escape(section)}\][ \t]*(\r?\n)")
         m = sec_re.search(text)
@@ -684,7 +804,7 @@ def install_reframework_nightly(game):
     downloaded = False
     try:
         url = "https://github.com/praydog/REFramework-nightly/releases/latest/download/REFramework.zip"
-        req = urllib.request.Request(url, headers={"User-Agent": "HelixSR-Swapper/1.7.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": f"HelixSR-Manager/{APP_VERSION}"})
         with urllib.request.urlopen(req, timeout=20) as resp, open(zip_path, "wb") as out:
             shutil.copyfileobj(resp, out)
 
@@ -761,6 +881,7 @@ def cleanup_helixsr_files(game):
 
         if os.path.isfile(marker_path) or os.path.isdir(helix_dir):
             opti = "dxgi.dll"
+            route = ""
             moved = []
             created = []
             ini_mode = ""
@@ -769,14 +890,32 @@ def cleanup_helixsr_files(game):
                     with open(marker_path, "r", encoding="utf-8") as f:
                         data = json.load(f)
                     opti = data.get("optiscaler", "dxgi.dll")
+                    route = data.get("route", "") or ""
                     ini_mode = data.get("ini", "")
                     moved = data.get("moved", [])
                     created = data.get("created", [])
                 except Exception:
                     pass
 
+            if route == "dlss":
+                # Experimental DLSS loader route: dxgi.dll (loader) + nvngx.dll (HelixSR) next to the .exe
+                opti = LOADER_DLL
+                core_copy = os.path.join(exe_dir, NVNGX_CORE_DLL)
+                if is_helixsr_binary(core_copy):
+                    try:
+                        os.remove(core_copy)
+                    except Exception:
+                        pass
+                for extra in ["helixsr.log", "helixsr_loader.log"] + NETWORK_FILES:
+                    ep = os.path.join(exe_dir, extra)
+                    if os.path.isfile(ep):
+                        try:
+                            os.remove(ep)
+                        except Exception:
+                            pass
+
             opti_file = os.path.join(exe_dir, opti)
-            if os.path.isfile(opti_file):
+            if os.path.isfile(opti_file) and (route != "dlss" or is_dlss_loader_binary(opti_file)):
                 try:
                     os.remove(opti_file)
                 except Exception:
@@ -881,7 +1020,7 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
     manifests = get_steam_manifests()
     game = scan_game(game_folder, None, manifests)
 
-    if route_override in ("direct", "optiscaler"):
+    if route_override in ("direct", "optiscaler", "dlss"):
         game["route"] = route_override
     if opti_dll:
         game["optiDllName"] = opti_dll
@@ -914,7 +1053,7 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
             "optiscaler": opti_name,
             "fakenvapi": bool(game.get("useFakeNvapi", True)),
             "fg_mode": active_fg_mode,
-            "helixsr": "1.7.0",
+            "helixsr": CORE_VERSION,
             "route": "optiscaler",
         }
 
@@ -962,10 +1101,7 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
             shutil.copy2(src_ffx_dll, os.path.join(helix_dir, OWN_DLL))
             shutil.copy2(src_ffx_dll, os.path.join(helix_dir, OWN_SR_DLL))
 
-        for net in NETWORK_FILES:
-            snet = os.path.join(CORE_DIR, net)
-            if os.path.isfile(snet):
-                shutil.copy2(snet, os.path.join(helix_dir, net))
+        sync_network_files(helix_dir)
 
         my_fsr_dir = os.path.join(helix_dir, MY_FSR_FOLDER)
         os.makedirs(my_fsr_dir, exist_ok=True)
@@ -996,6 +1132,12 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
                     if not os.path.isfile(dst_nukem):
                         created_list.append(fg_dll)
                     shutil.copy2(src_fg, dst_nukem)
+
+        # HelixSR 1.8+ ships AMD's FSR frame generation DLL; use it when no custom one was provided
+        bundled_fg = os.path.join(CORE_DIR, "amd-fsr", AMD_FG_FILE)
+        dst_fg = os.path.join(helix_dir, AMD_FG_FILE)
+        if not os.path.isfile(dst_fg) and os.path.isfile(bundled_fg):
+            shutil.copy2(bundled_fg, dst_fg)
 
         if os.path.isfile(game_ini):
             with open(game_ini, "r", encoding="utf-8", errors="ignore") as f:
@@ -1063,12 +1205,9 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
                     os.replace(target, orig)
                 shutil.copy2(src_ffx_dll, target)
                 tdir = os.path.dirname(target)
-                for net in NETWORK_FILES:
-                    snet = os.path.join(CORE_DIR, net)
-                    if os.path.isfile(snet):
-                        shutil.copy2(snet, os.path.join(tdir, net))
+                sync_network_files(tdir)
                 with open(os.path.join(tdir, MARKER_FILE), "w", encoding="utf-8") as f:
-                    json.dump({"helixsr": "1.7.0", "route": "direct"}, f, indent=2)
+                    json.dump({"helixsr": CORE_VERSION, "route": "direct"}, f, indent=2)
         else:
             created_dlls = []
             for dll_name in (DLL_SR, DLL_FSR):
@@ -1079,15 +1218,52 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
                 elif not os.path.isfile(dst):
                     created_dlls.append(dll_name)
                 shutil.copy2(src_ffx_dll, dst)
-            for net in NETWORK_FILES:
-                snet = os.path.join(CORE_DIR, net)
-                if os.path.isfile(snet):
-                    shutil.copy2(snet, os.path.join(t, net))
+            sync_network_files(t)
             with open(os.path.join(t, MARKER_FILE), "w", encoding="utf-8") as f:
-                json.dump({"helixsr": "1.7.0", "route": "direct", "created_dlls": created_dlls}, f, indent=2)
+                json.dump({"helixsr": CORE_VERSION, "route": "direct", "created_dlls": created_dlls}, f, indent=2)
 
         clear_shader_cache(game)
         sanitize_game_config(game)
+
+    elif game["route"] == "dlss":
+        # EXPERIMENTAL (HelixSR 1.8.1): HelixSR's DLSS loader as dxgi.dll + HelixSR (one-file DLL) as nvngx.dll
+        # next to the game's .exe; the game's own DLSS option then runs HelixSR, without OptiScaler.
+        if not os.path.isdir(t):
+            raise RuntimeError("Game executable directory not found.")
+        src_loader = os.path.join(CORE_DIR, LOADER_FOLDER, LOADER_DLL)
+        if not os.path.isfile(src_loader):
+            raise RuntimeError(f"HelixSR DLSS loader missing at: {src_loader}")
+
+        helix_dir = os.path.join(t, HELIXSR_FOLDER)
+        backup_dir = os.path.join(helix_dir, BACKUP_FOLDER)
+        marker_path = os.path.join(helix_dir, MARKER_FILE)
+        os.makedirs(backup_dir, exist_ok=True)
+
+        moved_list = []
+        for name in (LOADER_DLL, NVNGX_CORE_DLL):
+            cur = os.path.join(t, name)
+            ours = is_dlss_loader_binary(cur) if name == LOADER_DLL else is_helixsr_binary(cur)
+            if os.path.isfile(cur) and not ours:
+                bak = os.path.join(backup_dir, name)
+                if os.path.isfile(bak):
+                    os.remove(bak)
+                shutil.move(cur, bak)
+                moved_list.append(name)
+
+        shutil.copy2(src_loader, os.path.join(t, LOADER_DLL))
+        shutil.copy2(src_ffx_dll, os.path.join(t, NVNGX_CORE_DLL))
+        sync_network_files(t)
+
+        with open(marker_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "helixsr": CORE_VERSION,
+                "route": "dlss",
+                "files": [LOADER_DLL, NVNGX_CORE_DLL],
+                "moved": moved_list,
+                "created": [],
+            }, f, indent=2)
+
+        clear_shader_cache(game)
 
     if game.get("installReFramework"):
         install_reframework_nightly(game)
@@ -1104,7 +1280,12 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
         }
         fg_tag = fg_map.get(active_fg_mode, "")
 
-    method_label = f"OptiScaler ({game.get('optiDllName', 'dxgi.dll')}{fg_tag})" if game["route"] == "optiscaler" else "Direct FSR 3.1"
+    if game["route"] == "optiscaler":
+        method_label = f"OptiScaler ({game.get('optiDllName', 'dxgi.dll')}{fg_tag})"
+    elif game["route"] == "dlss":
+        method_label = "DLSS Loader (Experimental)"
+    else:
+        method_label = "Direct FSR 3.1"
     if game.get("installReFramework"):
         method_label += " + REFramework Nightly"
     return {"success": True, "message": f"Installed HelixSR [{method_label}] for {game['name']}!"}
@@ -1175,6 +1356,66 @@ def broadcast_build_log(msg):
             q.append(line)
 
 
+def sync_helixsr_to_installed_games():
+    """After a rebuild: copy the new HelixSR DLL (network embedded since 1.8) into every game HelixSR is installed in."""
+    if not get_core_status()["weightsBuilt"]:
+        return 0
+    src_dll = os.path.join(CORE_DIR, DLL_FSR)
+    if not os.path.isfile(src_dll):
+        return 0
+    count = 0
+    for g in scan_all_games():
+        if not g.get("installed"):
+            continue
+        try:
+            updated = False
+            t = g.get("exeFolder") or g.get("folder")
+            if g["route"] == "optiscaler" and t:
+                for d in (os.path.join(t, HELIXSR_FOLDER), os.path.join(t, "_storage_", HELIXSR_FOLDER)):
+                    if not os.path.isdir(d):
+                        continue
+                    shutil.copy2(src_dll, os.path.join(d, OWN_DLL))
+                    shutil.copy2(src_dll, os.path.join(d, OWN_SR_DLL))
+                    sync_network_files(d)
+                    updated = True
+                update_marker_version(os.path.join(t, HELIXSR_FOLDER, MARKER_FILE))
+            elif g["route"] == "dlss" and t:
+                core = os.path.join(t, NVNGX_CORE_DLL)
+                if is_helixsr_binary(core):
+                    shutil.copy2(src_dll, core)
+                    sync_network_files(t)
+                    update_marker_version(os.path.join(t, HELIXSR_FOLDER, MARKER_FILE))
+                    updated = True
+            elif g["route"] == "direct":
+                any_target = False
+                for target in g.get("fsrTargets") or []:
+                    tdir = os.path.dirname(target)
+                    marker = os.path.join(tdir, MARKER_FILE)
+                    # only targets HelixSR owns (game's file kept as *.original.dll or our install record)
+                    if not os.path.isfile(os.path.splitext(target)[0] + ".original.dll") and not os.path.isfile(marker):
+                        continue
+                    any_target = True
+                    shutil.copy2(src_dll, target)
+                    sync_network_files(tdir)
+                    update_marker_version(marker)
+                    updated = True
+                exe_marker = os.path.join(t, MARKER_FILE) if t else None
+                if not any_target and exe_marker and os.path.isfile(exe_marker):
+                    for dll_name in (DLL_SR, DLL_FSR):
+                        dst = os.path.join(t, dll_name)
+                        if is_helixsr_binary(dst):
+                            shutil.copy2(src_dll, dst)
+                    sync_network_files(t)
+                    update_marker_version(exe_marker)
+                    updated = True
+            if updated:
+                count += 1
+        except Exception:
+            # game running / file locked: leave this game as it is, the user can reinstall it from the drawer
+            pass
+    return count
+
+
 def start_network_build(dlss_path="", wave64=False):
     global IS_BUILDING
     if IS_BUILDING:
@@ -1184,13 +1425,13 @@ def start_network_build(dlss_path="", wave64=False):
         global IS_BUILDING
         IS_BUILDING = True
         try:
+            # HelixSR 1.8+: both wave sizes are always built (wave64 flag kept only for API compatibility),
+            # the network is embedded into amd_fidelityfx_dx12.dll, and setup no longer has a build-only switch.
             if os.name == "nt":
                 ps1 = os.path.join(CORE_DIR, "helixsr-setup.ps1")
-                cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", ps1, "-Yes", "-Rebuild", "-BuildOnly"]
+                cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", ps1, "-Yes", "-Rebuild"]
                 if dlss_path and os.path.isfile(dlss_path):
                     cmd += ["-Dlss", dlss_path]
-                if wave64:
-                    cmd.append("-Wave64")
             else:
                 sh_script = os.path.join(CORE_DIR, "helixsr-setup.sh")
                 try:
@@ -1200,9 +1441,9 @@ def start_network_build(dlss_path="", wave64=False):
                 cmd = ["bash", sh_script, "--yes", "--rebuild"]
                 if dlss_path and os.path.isfile(dlss_path):
                     cmd += ["--dlss", dlss_path]
-                if wave64:
-                    cmd.append("--wave64")
 
+            env = dict(os.environ)
+            env["PYTHONUNBUFFERED"] = "1"
             broadcast_build_log("Starting HelixSR Network Compiler: " + " ".join(cmd))
             proc = subprocess.Popen(
                 cmd,
@@ -1212,12 +1453,25 @@ def start_network_build(dlss_path="", wave64=False):
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                env=env,
             )
+            # Upstream setup continues with its own interactive game installer after the build; the
+            # manager handles installs itself, so that part of the output is hidden.
+            suppress = False
             for line in proc.stdout:
+                if suppress:
+                    continue
+                if "looking for games" in line.lower():
+                    suppress = True
+                    broadcast_build_log("(HelixSR Manager installs games itself - skipping the setup's game installer)")
+                    continue
                 broadcast_build_log(line)
             proc.wait()
-            if proc.returncode == 0 or get_core_status()["weightsBuilt"]:
+            if get_core_status()["weightsBuilt"]:
                 broadcast_build_log("Build finished successfully!")
+                n = sync_helixsr_to_installed_games()
+                if n:
+                    broadcast_build_log(f"Updated HelixSR in {n} installed game(s).")
             else:
                 broadcast_build_log(f"Build exited with code {proc.returncode}")
         except Exception as e:

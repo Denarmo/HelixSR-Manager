@@ -13,15 +13,21 @@ namespace HelixSRSwapper
 {
     public class Engine
     {
+        /// <summary>HelixSR Manager release version (shown in the sidebar logo and window title).</summary>
+        public const string AppVersion = "1.9.0";
+        /// <summary>Bundled upstream HelixSR core version (helixsr_core/HelixSR-x.y.z).</summary>
+        public const string CoreVersion = "1.8.1";
+
         public static string CoreDir
         {
             get
             {
+                string coreFolder = "HelixSR-" + CoreVersion;
                 string asmDir = Path.GetDirectoryName(typeof(Engine).Assembly.Location);
-                string p1 = Path.Combine(asmDir, "helixsr_core", "HelixSR-1.7.0");
+                string p1 = Path.Combine(asmDir, "helixsr_core", coreFolder);
                 if (Directory.Exists(p1)) return Path.GetFullPath(p1);
 
-                string p2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "helixsr_core", "HelixSR-1.7.0");
+                string p2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "helixsr_core", coreFolder);
                 if (Directory.Exists(p2)) return Path.GetFullPath(p2);
 
                 return Path.GetFullPath(p1);
@@ -38,7 +44,15 @@ namespace HelixSRSwapper
         private static readonly string[] OptiNames = new string[] { "dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll", "d3d12.dll", "wininet.dll", "winhttp.dll", "OptiScaler.asi" };
         private static readonly string[] OptiExtra = new string[] { "fakenvapi.dll", "fakenvapi.ini", "nvapi64.dll" };
         private const string AmdFsrFile = "amd_fidelityfx_upscaler_dx12.amd.dll";
+        private const string AmdFgFile = "amd_fidelityfx_framegeneration_dx12.dll"; // bundled in core/amd-fsr since HelixSR 1.8.0
         private const string MyFsrFolder = "my-fsr";
+        // Experimental route (HelixSR 1.8.1): HelixSR DLSS loader (dxgi.dll) + HelixSR as nvngx.dll next to the game's .exe
+        private const string LoaderFolder = "dlss-loader";
+        private const string LoaderDll = "dxgi.dll";
+        private const string NvngxCoreDll = "nvngx.dll";
+        // HelixSR 1.8.0+ setup appends the network to amd_fidelityfx_dx12.dll ("one-file DLL"); the last 32 bytes are
+        // "HXSRNET1" + uint64 weights size + uint64 kernels size + uint64 reserved.
+        private static readonly byte[] EmbedMagic = Encoding.ASCII.GetBytes("HXSRNET1");
 
         private const string MyFsrReadme = "Put an FSR upscaler DLL into this folder (for example FSR 4: amd_fidelityfx_upscaler_dx12.dll, any\r\nfile name) and start the game again. Only for this game.\r\n\r\nIn the game press Insert (OptiScaler's menu), then Upscaling tab > Upscalers > FFX Upscaler, and pick it there:\r\nit is listed by its version, for example \"FSR 4.1.1\". HelixSR stays the default (\"FSR HelixSR (3.1.5)\").\r\nFSR 4 is listed only if the DLL supports your GPU.\r\n\r\nTo go back: delete the DLL from this folder.\r\n";
 
@@ -59,6 +73,143 @@ namespace HelixSRSwapper
             }
             catch { }
             return Directory.Exists(@"Z:\home") || Directory.Exists("/home");
+        }
+
+        /// <summary>
+        /// Reads the trailer the HelixSR 1.8+ setup appends to amd_fidelityfx_dx12.dll. True when the DLL carries the network.
+        /// </summary>
+        public static bool TryReadEmbeddedNetwork(string dllPath, out long weightsSize, out long kernelsSize)
+        {
+            weightsSize = 0;
+            kernelsSize = 0;
+            try
+            {
+                if (string.IsNullOrEmpty(dllPath) || !File.Exists(dllPath)) return false;
+                using (var fs = new FileStream(dllPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    if (fs.Length <= 32) return false;
+                    fs.Seek(-32, SeekOrigin.End);
+                    var tail = new byte[32];
+                    int read = 0;
+                    while (read < tail.Length)
+                    {
+                        int n = fs.Read(tail, read, tail.Length - read);
+                        if (n <= 0) return false;
+                        read += n;
+                    }
+                    for (int i = 0; i < EmbedMagic.Length; i++)
+                    {
+                        if (tail[i] != EmbedMagic[i]) return false;
+                    }
+                    weightsSize = BitConverter.ToInt64(tail, 8);
+                    kernelsSize = BitConverter.ToInt64(tail, 16);
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static bool HasEmbeddedNetwork(string dllPath)
+        {
+            long w, k;
+            return TryReadEmbeddedNetwork(dllPath, out w, out k);
+        }
+
+        private static bool CoreHasSeparateNetworkFiles()
+        {
+            foreach (var n in NetworkFiles)
+            {
+                string p = Path.Combine(CoreDir, n);
+                if (!File.Exists(p) || new FileInfo(p).Length == 0) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Mirrors upstream copy_network(): the separate network files are only deployed when the core DLL does not carry
+        /// the network (pre-1.8 builds); otherwise stale copies are removed (the DLL reads its own embedded copy first).
+        /// </summary>
+        private static void SyncNetworkFiles(string destDir)
+        {
+            if (string.IsNullOrEmpty(destDir) || !Directory.Exists(destDir)) return;
+            bool embedded = HasEmbeddedNetwork(Path.Combine(CoreDir, DllFsr));
+            foreach (var n in NetworkFiles)
+            {
+                string src = Path.Combine(CoreDir, n);
+                string dst = Path.Combine(destDir, n);
+                if (!embedded && File.Exists(src))
+                {
+                    File.Copy(src, dst, true);
+                }
+                else if (embedded && File.Exists(dst))
+                {
+                    try { File.Delete(dst); } catch { }
+                }
+            }
+        }
+
+        private static bool FileContainsAscii(string path, int maxBytes, Regex pattern)
+        {
+            try
+            {
+                if (!File.Exists(path)) return false;
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    int len = (int)Math.Min(fs.Length, maxBytes);
+                    var buf = new byte[len];
+                    int read = 0;
+                    while (read < len)
+                    {
+                        int n = fs.Read(buf, read, len - read);
+                        if (n <= 0) break;
+                        read += n;
+                    }
+                    // Latin-1 maps every byte 1:1 to a char, so ASCII markers inside binaries survive the conversion
+                    string text = Encoding.GetEncoding(28591).GetString(buf, 0, read);
+                    return pattern.IsMatch(text);
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static readonly Regex HelixSrVersionMarker = new Regex(@"HelixSR \d+\.\d+\.\d+");
+        private static readonly Regex DlssLoaderMarker = new Regex(@"HelixSR DLSS loader");
+
+        /// <summary>True when the file is a HelixSR DLL (same check as upstream helixsr_install.is_helixsr).</summary>
+        private static bool IsHelixSrBinary(string path)
+        {
+            return FileContainsAscii(path, 4 << 20, HelixSrVersionMarker);
+        }
+
+        /// <summary>True when the file is HelixSR's DLSS loader (same check as upstream helixsr_install.is_loader).</summary>
+        private static bool IsDlssLoaderBinary(string path)
+        {
+            return FileContainsAscii(path, 1 << 20, DlssLoaderMarker);
+        }
+
+        public static bool IsDlssLoaderAvailable()
+        {
+            return File.Exists(Path.Combine(CoreDir, LoaderFolder, LoaderDll));
+        }
+
+        /// <summary>Rewrites the "helixsr" version of an install record after the deployed DLL was refreshed.</summary>
+        private static void UpdateMarkerVersion(string markerPath)
+        {
+            if (!File.Exists(markerPath)) return;
+            try
+            {
+                var data = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(markerPath));
+                if (data == null) return;
+                data["helixsr"] = CoreVersion;
+                File.WriteAllText(markerPath, Json.Serialize(data));
+            }
+            catch { }
         }
 
         public static string NormalizePath(string path)
@@ -330,8 +481,9 @@ namespace HelixSRSwapper
             game.IsReEngine = DetectReEngine(gameFolder, game);
             game.InstallReFramework = game.IsReEngine || File.Exists(Path.Combine(game.ExeFolder ?? gameFolder, "reframework_revision.txt"));
 
-            // Check if OptiScaler route is currently installed
+            // Check if OptiScaler (or experimental DLSS loader) route is currently installed
             bool optiInstalled = false;
+            bool dlssInstalled = false;
             if (!string.IsNullOrEmpty(game.ExeFolder))
             {
                 string helixDir = Path.Combine(game.ExeFolder, HelixSrFolder);
@@ -348,6 +500,11 @@ namespace HelixSRSwapper
                             if (data.ContainsKey("optiscaler")) game.OptiDllName = data["optiscaler"].ToString();
                             if (data.ContainsKey("fakenvapi") && data["fakenvapi"] is bool) game.UseFakeNvapi = (bool)data["fakenvapi"];
                             if (data.ContainsKey("fg_mode") && data["fg_mode"] != null) game.FgMode = data["fg_mode"].ToString();
+                            if (data.ContainsKey("route") && data["route"] != null && data["route"].ToString() == "dlss")
+                            {
+                                dlssInstalled = true;
+                                optiInstalled = false;
+                            }
                         }
                     }
                     catch { }
@@ -355,7 +512,8 @@ namespace HelixSRSwapper
 
                 string backupDir = Path.Combine(helixDir, BackupFolder);
                 if (Directory.Exists(backupDir) && Directory.GetFiles(backupDir).Length > 0) game.HasBackups = true;
-                if (File.Exists(Path.Combine(helixDir, "helixsr.log")) || File.Exists(Path.Combine(game.ExeFolder, "OptiScaler.log"))) game.HasLogs = true;
+                if (File.Exists(Path.Combine(helixDir, "helixsr.log")) || File.Exists(Path.Combine(game.ExeFolder, "OptiScaler.log"))
+                    || File.Exists(Path.Combine(game.ExeFolder, "helixsr.log")) || File.Exists(Path.Combine(game.ExeFolder, "helixsr_loader.log"))) game.HasLogs = true;
                 if (Directory.Exists(Path.Combine(helixDir, MyFsrFolder))) game.HasMyFsr = true;
             }
 
@@ -397,7 +555,12 @@ namespace HelixSRSwapper
                 }
             }
 
-            if (optiInstalled)
+            if (dlssInstalled)
+            {
+                game.Route = "dlss";
+                game.Installed = true;
+            }
+            else if (optiInstalled)
             {
                 game.Route = "optiscaler";
                 game.Installed = true;
@@ -441,6 +604,13 @@ namespace HelixSRSwapper
                         bestExeDir = dir;
                         bestExeSize = long.MaxValue / 2;
                     }
+                }
+                // A folder that already has a HelixSR install record (OptiScaler or DLSS loader route) wins, as upstream
+                if (!hasOptiMarker && File.Exists(Path.Combine(dir, HelixSrFolder, MarkerFile)))
+                {
+                    hasOptiMarker = true;
+                    bestExeDir = dir;
+                    bestExeSize = long.MaxValue / 2;
                 }
 
                 foreach (var f in files)
@@ -577,10 +747,15 @@ namespace HelixSRSwapper
         public static CoreStatus GetCoreStatus()
         {
             bool coreExists = Directory.Exists(CoreDir);
+            string dllPath = Path.Combine(CoreDir, DllFsr);
             string wPath = Path.Combine(CoreDir, "helixsr_weights.bin");
             string kPath = Path.Combine(CoreDir, "helixsr_kernels.pak");
-            bool wBuilt = File.Exists(wPath) && new FileInfo(wPath).Length > 0;
-            bool kBuilt = File.Exists(kPath) && new FileInfo(kPath).Length > 0;
+
+            // HelixSR 1.8+: the setup embeds the network into the core DLL (one-file DLL)
+            long embW, embK;
+            bool embedded = TryReadEmbeddedNetwork(dllPath, out embW, out embK);
+            // Older setups (<= 1.7) left two separate files next to the DLL
+            bool separate = CoreHasSeparateNetworkFiles();
 
             string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string pyExe = Path.Combine(localApp, "HelixSR", "python", "python.exe");
@@ -588,12 +763,14 @@ namespace HelixSRSwapper
 
             return new CoreStatus
             {
-                Version = "1.7.0",
+                Version = CoreVersion,
                 CoreDir = CoreDir,
                 CoreExists = coreExists,
-                WeightsBuilt = wBuilt && kBuilt,
-                WeightsSize = wBuilt ? new FileInfo(wPath).Length : 0,
-                KernelsSize = kBuilt ? new FileInfo(kPath).Length : 0,
+                WeightsBuilt = embedded || separate,
+                NetworkEmbedded = embedded,
+                WeightsSize = embedded ? embW : (separate ? new FileInfo(wPath).Length : 0),
+                KernelsSize = embedded ? embK : (separate ? new FileInfo(kPath).Length : 0),
+                DllSize = File.Exists(dllPath) ? new FileInfo(dllPath).Length : 0,
                 HasPython = File.Exists(pyExe),
                 HasDxc = File.Exists(dxcExe),
                 PythonPath = pyExe,
@@ -608,7 +785,7 @@ namespace HelixSRSwapper
 
             var coreStatus = GetCoreStatus();
             if (!coreStatus.WeightsBuilt)
-                throw new InvalidOperationException("HelixSR Network weights & compute kernels have not been built yet.\nPlease go to the 'Compiler' tab and click 'Build Network Weights & Kernels' first.");
+                throw new InvalidOperationException("The HelixSR network has not been built yet.\nPlease go to the 'Engine & Weights' tab and click 'Build HelixSR Network' first (HelixSR 1.8+ embeds the network into amd_fidelityfx_dx12.dll).");
 
             // Clean up any previous installation artifacts first so switching routes or proxy DLL names is 100% clean
             CleanupHelixSRFiles(game);
@@ -712,15 +889,8 @@ namespace HelixSRSwapper
                     File.Copy(srcFfxDll, Path.Combine(helixDir, OwnSrDll), true);
                 }
 
-                // Copy Network Weights & Kernels
-                foreach (var net in NetworkFiles)
-                {
-                    string srcNet = Path.Combine(CoreDir, net);
-                    if (File.Exists(srcNet))
-                    {
-                        File.Copy(srcNet, Path.Combine(helixDir, net), true);
-                    }
-                }
+                // Separate network files only for pre-1.8 builds (1.8+ carries the network inside the DLL)
+                SyncNetworkFiles(helixDir);
 
                 // Create my-fsr folder
                 string myFsrDir = Path.Combine(helixDir, MyFsrFolder);
@@ -736,7 +906,7 @@ namespace HelixSRSwapper
 
                 // Copy optional Frame Generation DLLs from Core my-fsr or Game my-fsr if present
                 string coreMyFsr = Path.Combine(CoreDir, MyFsrFolder);
-                string[] fgOptFiles = new string[] { "amd_fidelityfx_framegeneration_dx12.dll", "libxess_fg.dll", "libxell.dll" };
+                string[] fgOptFiles = new string[] { AmdFgFile, "libxess_fg.dll", "libxell.dll" };
                 foreach (var fgFile in fgOptFiles)
                 {
                     string srcCoreFg = Path.Combine(coreMyFsr, fgFile);
@@ -744,6 +914,14 @@ namespace HelixSRSwapper
                     string dstHelixFg = Path.Combine(helixDir, fgFile);
                     if (File.Exists(srcGameFg)) File.Copy(srcGameFg, dstHelixFg, true);
                     else if (File.Exists(srcCoreFg)) File.Copy(srcCoreFg, dstHelixFg, true);
+                }
+
+                // HelixSR 1.8+ ships AMD's FSR frame generation (core/amd-fsr): use it when no custom FG DLL was provided
+                string bundledFg = Path.Combine(CoreDir, "amd-fsr", AmdFgFile);
+                string helixFg = Path.Combine(helixDir, AmdFgFile);
+                if (!File.Exists(helixFg) && File.Exists(bundledFg))
+                {
+                    File.Copy(bundledFg, helixFg, true);
                 }
 
                 // Copy dlssg_to_fsr3_amd_is_better.dll next to game exe if present in my-fsr
@@ -768,11 +946,7 @@ namespace HelixSRSwapper
                         File.Copy(srcFfxDll, Path.Combine(subHelix, OwnDll), true);
                         File.Copy(srcFfxDll, Path.Combine(subHelix, OwnSrDll), true);
                     }
-                    foreach (var net in NetworkFiles)
-                    {
-                        string srcNet = Path.Combine(CoreDir, net);
-                        if (File.Exists(srcNet)) File.Copy(srcNet, Path.Combine(subHelix, net), true);
-                    }
+                    SyncNetworkFiles(subHelix);
                 }
 
                 // Clear any broken/corrupted shader caches from previous crashes so game compiles fresh clean shaders
@@ -842,7 +1016,7 @@ namespace HelixSRSwapper
 
                 rec["moved"] = movedList;
                 rec["created"] = createdList;
-                rec["helixsr"] = "1.7.0";
+                rec["helixsr"] = CoreVersion;
                 rec["route"] = "optiscaler";
 
                 File.WriteAllText(markerPath, Json.Serialize(rec));
@@ -863,19 +1037,13 @@ namespace HelixSRSwapper
                         }
                         File.Copy(srcFfx, target, true);
 
-                        foreach (var net in NetworkFiles)
-                        {
-                            string srcNet = Path.Combine(CoreDir, net);
-                            if (File.Exists(srcNet))
-                            {
-                                File.Copy(srcNet, Path.Combine(Path.GetDirectoryName(target), net), true);
-                            }
-                        }
+                        SyncNetworkFiles(Path.GetDirectoryName(target));
 
                         string marker = Path.Combine(Path.GetDirectoryName(target), MarkerFile);
                         var rec = new Dictionary<string, object>
                         {
-                            { "helixsr", "1.7.0" },
+                            { "helixsr", CoreVersion },
+                            { "files", new List<string> { Path.GetFileName(target) } },
                             { "route", "direct" }
                         };
                         File.WriteAllText(marker, Json.Serialize(rec));
@@ -900,19 +1068,12 @@ namespace HelixSRSwapper
                         File.Copy(srcFfx, dst, true);
                     }
 
-                    foreach (var net in NetworkFiles)
-                    {
-                        string srcNet = Path.Combine(CoreDir, net);
-                        if (File.Exists(srcNet))
-                        {
-                            File.Copy(srcNet, Path.Combine(t, net), true);
-                        }
-                    }
+                    SyncNetworkFiles(t);
 
                     string marker = Path.Combine(t, MarkerFile);
                     var rec = new Dictionary<string, object>
                     {
-                        { "helixsr", "1.7.0" },
+                        { "helixsr", CoreVersion },
                         { "route", "direct" },
                         { "created_dlls", createdDlls }
                     };
@@ -924,6 +1085,51 @@ namespace HelixSRSwapper
 
                 // Sanitize Capcom RE Engine config.ini if present (reset stale foreign GPU adapter locks and DLSS reflex)
                 SanitizeGameConfig(game);
+            }
+            else if (game.Route == "dlss")
+            {
+                // EXPERIMENTAL (HelixSR 1.8.1): HelixSR's DLSS loader as dxgi.dll + HelixSR (one-file DLL) as nvngx.dll next
+                // to the game's .exe; the game's own DLSS option then runs HelixSR, without OptiScaler.
+                string t = game.ExeFolder ?? game.Folder;
+                if (!Directory.Exists(t)) throw new DirectoryNotFoundException("Game executable directory not found.");
+                string srcLoader = Path.Combine(CoreDir, LoaderFolder, LoaderDll);
+                if (!File.Exists(srcLoader))
+                    throw new FileNotFoundException(string.Format("HelixSR DLSS loader missing at: {0}", srcLoader));
+
+                string helixDir = Path.Combine(t, HelixSrFolder);
+                string backupDir = Path.Combine(helixDir, BackupFolder);
+                string markerPath = Path.Combine(helixDir, MarkerFile);
+                Directory.CreateDirectory(backupDir);
+
+                var movedList = new List<string>();
+                foreach (var name in new string[] { LoaderDll, NvngxCoreDll })
+                {
+                    string cur = Path.Combine(t, name);
+                    bool ours = name == LoaderDll ? IsDlssLoaderBinary(cur) : IsHelixSrBinary(cur);
+                    if (File.Exists(cur) && !ours)
+                    {
+                        string bak = Path.Combine(backupDir, name);
+                        if (File.Exists(bak)) File.Delete(bak);
+                        File.Move(cur, bak);
+                        movedList.Add(name);
+                    }
+                }
+
+                File.Copy(srcLoader, Path.Combine(t, LoaderDll), true);
+                File.Copy(Path.Combine(CoreDir, DllFsr), Path.Combine(t, NvngxCoreDll), true);
+                SyncNetworkFiles(t);
+
+                var rec = new Dictionary<string, object>
+                {
+                    { "helixsr", CoreVersion },
+                    { "route", "dlss" },
+                    { "files", new List<string> { LoaderDll, NvngxCoreDll } },
+                    { "moved", movedList },
+                    { "created", new List<string>() }
+                };
+                File.WriteAllText(markerPath, Json.Serialize(rec));
+
+                ClearShaderCache(game);
             }
 
             if (game.InstallReFramework)
@@ -951,6 +1157,7 @@ namespace HelixSRSwapper
                 if (File.Exists(markerPath) || Directory.Exists(helixDir))
                 {
                     string opti = "dxgi.dll";
+                    string route = "";
                     var moved = new List<string>();
                     var created = new List<string>();
                     string iniMode = "";
@@ -963,6 +1170,7 @@ namespace HelixSRSwapper
                             if (data != null)
                             {
                                 if (data.ContainsKey("optiscaler")) opti = data["optiscaler"].ToString();
+                                if (data.ContainsKey("route") && data["route"] != null) route = data["route"].ToString();
                                 if (data.ContainsKey("ini")) iniMode = data["ini"].ToString();
                                 if (data.ContainsKey("moved"))
                                 {
@@ -979,8 +1187,26 @@ namespace HelixSRSwapper
                         catch { }
                     }
 
+                    if (route == "dlss")
+                    {
+                        // Experimental DLSS loader route: dxgi.dll (loader) + nvngx.dll (HelixSR) next to the .exe
+                        opti = LoaderDll;
+                        string coreCopy = Path.Combine(t, NvngxCoreDll);
+                        if (File.Exists(coreCopy) && IsHelixSrBinary(coreCopy)) { try { File.Delete(coreCopy); } catch { } }
+                        foreach (var extra in new string[] { "helixsr.log", "helixsr_loader.log" })
+                        {
+                            string ep = Path.Combine(t, extra);
+                            if (File.Exists(ep)) { try { File.Delete(ep); } catch { } }
+                        }
+                        foreach (var net in NetworkFiles)
+                        {
+                            string np = Path.Combine(t, net);
+                            if (File.Exists(np)) { try { File.Delete(np); } catch { } }
+                        }
+                    }
+
                     string optiFile = Path.Combine(t, opti);
-                    if (File.Exists(optiFile)) { try { File.Delete(optiFile); } catch { } }
+                    if (File.Exists(optiFile) && (route != "dlss" || IsDlssLoaderBinary(optiFile))) { try { File.Delete(optiFile); } catch { } }
 
                     string gameIni = Path.Combine(t, "OptiScaler.ini");
                     string bIni = Path.Combine(backupDir, "OptiScaler.ini");
@@ -1157,63 +1383,91 @@ namespace HelixSRSwapper
             return cleared;
         }
 
-        public static int SyncNetworkFilesToInstalledGames()
+        /// <summary>
+        /// Refreshes HelixSR in every installed game after the network was (re)built. Since HelixSR 1.8 the network lives
+        /// inside amd_fidelityfx_dx12.dll, so the deployed DLL copies themselves are updated (plus separate network files
+        /// for legacy builds). Returns the number of games updated.
+        /// </summary>
+        public static int SyncHelixSRToInstalledGames()
         {
             var status = GetCoreStatus();
             if (!status.WeightsBuilt) return 0;
+
+            string srcDll = Path.Combine(CoreDir, DllFsr);
+            if (!File.Exists(srcDll)) return 0;
 
             int count = 0;
             var allGames = ScanAllGames(null);
             foreach (var g in allGames)
             {
-                if (g.Installed && !string.IsNullOrEmpty(g.ExeFolder))
+                if (!g.Installed) continue;
+                try
                 {
-                    string helixDir = Path.Combine(g.ExeFolder, HelixSrFolder);
-                    if (Directory.Exists(helixDir))
+                    bool updated = false;
+                    string t = g.ExeFolder ?? g.Folder;
+
+                    if (g.Route == "optiscaler" && !string.IsNullOrEmpty(t))
                     {
-                        foreach (var net in NetworkFiles)
+                        foreach (var dir in new string[] { Path.Combine(t, HelixSrFolder), Path.Combine(t, "_storage_", HelixSrFolder) })
                         {
-                            string src = Path.Combine(CoreDir, net);
-                            if (File.Exists(src))
-                            {
-                                File.Copy(src, Path.Combine(helixDir, net), true);
-                            }
+                            if (!Directory.Exists(dir)) continue;
+                            File.Copy(srcDll, Path.Combine(dir, OwnDll), true);
+                            File.Copy(srcDll, Path.Combine(dir, OwnSrDll), true);
+                            SyncNetworkFiles(dir);
+                            updated = true;
                         }
-
-                        // Also update _storage_ if Capcom RE Engine
-                        string subStorage = Path.Combine(g.ExeFolder, "_storage_", HelixSrFolder);
-                        if (Directory.Exists(subStorage))
-                        {
-                            foreach (var net in NetworkFiles)
-                            {
-                                string src = Path.Combine(CoreDir, net);
-                                if (File.Exists(src)) File.Copy(src, Path.Combine(subStorage, net), true);
-                            }
-                        }
-
-                        count++;
+                        UpdateMarkerVersion(Path.Combine(t, HelixSrFolder, MarkerFile));
                     }
+                    else if (g.Route == "dlss" && !string.IsNullOrEmpty(t))
+                    {
+                        string core = Path.Combine(t, NvngxCoreDll);
+                        if (File.Exists(core) && IsHelixSrBinary(core))
+                        {
+                            File.Copy(srcDll, core, true);
+                            SyncNetworkFiles(t);
+                            UpdateMarkerVersion(Path.Combine(t, HelixSrFolder, MarkerFile));
+                            updated = true;
+                        }
+                    }
+                    else if (g.Route == "direct")
+                    {
+                        bool anyTarget = false;
+                        if (g.FsrTargets != null)
+                        {
+                            foreach (var target in g.FsrTargets)
+                            {
+                                string targetDir = Path.GetDirectoryName(target);
+                                string marker = Path.Combine(targetDir, MarkerFile);
+                                // only targets HelixSR owns (game's file kept as *.original.dll or our install record)
+                                if (!File.Exists(Path.ChangeExtension(target, ".original.dll")) && !File.Exists(marker)) continue;
+                                anyTarget = true;
+                                File.Copy(srcDll, target, true);
+                                SyncNetworkFiles(targetDir);
+                                UpdateMarkerVersion(marker);
+                                updated = true;
+                            }
+                        }
+
+                        string exeMarker = string.IsNullOrEmpty(t) ? null : Path.Combine(t, MarkerFile);
+                        if (!anyTarget && exeMarker != null && File.Exists(exeMarker))
+                        {
+                            // Standalone drop-in next to the executable
+                            foreach (var dllName in new string[] { DllSr, DllFsr })
+                            {
+                                string dst = Path.Combine(t, dllName);
+                                if (File.Exists(dst) && IsHelixSrBinary(dst)) File.Copy(srcDll, dst, true);
+                            }
+                            SyncNetworkFiles(t);
+                            UpdateMarkerVersion(exeMarker);
+                            updated = true;
+                        }
+                    }
+
+                    if (updated) count++;
                 }
-                else if (g.Installed && g.Route == "direct" && g.FsrTargets != null)
+                catch
                 {
-                    bool directUpdated = false;
-                    foreach (var target in g.FsrTargets)
-                    {
-                        string targetDir = Path.GetDirectoryName(target);
-                        if (Directory.Exists(targetDir))
-                        {
-                            foreach (var net in NetworkFiles)
-                            {
-                                string src = Path.Combine(CoreDir, net);
-                                if (File.Exists(src))
-                                {
-                                    File.Copy(src, Path.Combine(targetDir, net), true);
-                                    directUpdated = true;
-                                }
-                            }
-                        }
-                    }
-                    if (directUpdated) count++;
+                    // game running / file locked: leave this game as it is, the user can reinstall it from the drawer
                 }
             }
             return count;
@@ -1316,7 +1570,7 @@ namespace HelixSRSwapper
             {
                 string url = "https://github.com/praydog/REFramework-nightly/releases/latest/download/REFramework.zip";
                 var req = (HttpWebRequest)WebRequest.Create(url);
-                req.UserAgent = "HelixSR-Swapper/1.7.0";
+                req.UserAgent = "HelixSR-Manager/" + AppVersion;
                 req.Timeout = 20000;
                 req.ReadWriteTimeout = 20000;
                 req.AllowAutoRedirect = true;

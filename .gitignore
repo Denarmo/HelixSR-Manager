@@ -11,6 +11,7 @@ config.json
 **/helixsr_kernels.pak
 **/helixsr_setup.json
 **/manual-install/
+**/fsr3-drop-in/
 
 # Python bytecode & runtime logs
 **/__pycache__/

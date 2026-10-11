@@ -607,10 +607,20 @@ namespace HelixSRSwapper
                 {
                     folder = Path.GetDirectoryName(rawPath);
                 }
+                folder = Engine.NormalizePath(folder);
                 if (!string.IsNullOrEmpty(folder) && Directory.Exists(folder))
                 {
                     lastFolder = folder;
-                    if (!_customFolders.Contains(folder))
+                    bool exists = false;
+                    foreach (var cf in _customFolders)
+                    {
+                        if (string.Equals(Engine.NormalizePath(cf), folder, StringComparison.OrdinalIgnoreCase))
+                        {
+                            exists = true;
+                            break;
+                        }
+                    }
+                    if (!exists)
                     {
                         _customFolders.Add(folder);
                         added++;
@@ -678,13 +688,14 @@ namespace HelixSRSwapper
                         if (data.ContainsKey("customFolders"))
                         {
                             _customFolders.Clear();
+                            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                             var list = data["customFolders"] as System.Collections.ArrayList;
                             if (list != null)
                             {
                                 foreach (var item in list)
                                 {
-                                    string s = item.ToString();
-                                    if (!_customFolders.Contains(s)) _customFolders.Add(s);
+                                    string s = Engine.NormalizePath(item.ToString());
+                                    if (!string.IsNullOrEmpty(s) && seen.Add(s)) _customFolders.Add(s);
                                 }
                             }
                         }
@@ -3214,8 +3225,17 @@ namespace HelixSRSwapper
                 try { Environment.CurrentDirectory = Path.GetTempPath(); } catch { }
                 if (res == System.Windows.Forms.DialogResult.OK)
                 {
-                    string p = dialog.SelectedPath;
-                    if (Directory.Exists(p) && !_customFolders.Contains(p))
+                    string p = Engine.NormalizePath(dialog.SelectedPath);
+                    bool exists = false;
+                    foreach (var cf in _customFolders)
+                    {
+                        if (string.Equals(Engine.NormalizePath(cf), p, StringComparison.OrdinalIgnoreCase))
+                        {
+                            exists = true;
+                            break;
+                        }
+                    }
+                    if (!string.IsNullOrEmpty(p) && Directory.Exists(p) && !exists)
                     {
                         _customFolders.Add(p);
                         SaveSettings();

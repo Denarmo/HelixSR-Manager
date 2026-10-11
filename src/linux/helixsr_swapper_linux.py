@@ -103,8 +103,30 @@ def save_config(cfg):
         pass
 
 
+def normalize_path(p):
+    if not p:
+        return ""
+    sep = "\\" if os.name == "nt" else "/"
+    cleaned = p.replace("/", sep).replace("\\", sep)
+    try:
+        return os.path.normpath(os.path.abspath(cleaned)).rstrip("/\\")
+    except Exception:
+        return os.path.normpath(cleaned).rstrip("/\\")
+
+
+def canonical_key(p):
+    norm = normalize_path(p)
+    if not norm:
+        return ""
+    try:
+        return os.path.normcase(os.path.realpath(norm)).rstrip("/\\")
+    except Exception:
+        return os.path.normcase(norm).rstrip("/\\")
+
+
 def get_steam_roots():
     roots = []
+    seen = set()
     home = os.path.expanduser("~")
     candidates = [
         os.path.join(home, ".local", "share", "Steam"),
@@ -134,20 +156,24 @@ def get_steam_roots():
 
     for c in candidates:
         if os.path.isdir(c):
-            real = os.path.realpath(c)
-            if real not in roots:
+            real = normalize_path(os.path.realpath(c))
+            key = canonical_key(real)
+            if key and key not in seen:
+                seen.add(key)
                 roots.append(real)
-            if c not in roots:
-                roots.append(c)
     return roots
 
 
 def get_steam_libraries():
     libs = []
+    seen = set()
     for root in get_steam_roots():
-        direct_common = os.path.join(root, "steamapps", "common")
-        if os.path.isdir(direct_common) and direct_common not in libs:
-            libs.append(direct_common)
+        direct_common = normalize_path(os.path.join(root, "steamapps", "common"))
+        if os.path.isdir(direct_common):
+            key = canonical_key(direct_common)
+            if key and key not in seen:
+                seen.add(key)
+                libs.append(direct_common)
 
         vdf = os.path.join(root, "steamapps", "libraryfolders.vdf")
         if os.path.isfile(vdf):
@@ -155,10 +181,13 @@ def get_steam_libraries():
                 with open(vdf, "r", encoding="utf-8", errors="ignore") as f:
                     text = f.read()
                 for m in re.finditer(r'"path"\s+"([^"]+)"', text):
-                    p = m.group(1).replace("\\\\", "\\")
-                    common = os.path.join(p, "steamapps", "common")
-                    if os.path.isdir(common) and common not in libs:
-                        libs.append(common)
+                    p = normalize_path(m.group(1).replace("\\\\", "\\"))
+                    common = normalize_path(os.path.join(p, "steamapps", "common"))
+                    if os.path.isdir(common):
+                        key = canonical_key(common)
+                        if key and key not in seen:
+                            seen.add(key)
+                            libs.append(common)
             except Exception:
                 pass
     return libs
@@ -268,6 +297,7 @@ def compute_proton_launch_option(route, opti_dll, install_reframework):
 
 
 def scan_game(game_folder, fallback_name=None, manifests=None):
+    game_folder = normalize_path(game_folder)
     folder_name = os.path.basename(game_folder.rstrip("/\\"))
     manifest = manifests.get(folder_name.lower()) if manifests else None
     name = manifest["name"] if manifest else (fallback_name or folder_name)
@@ -490,27 +520,36 @@ def scan_all_games():
     scanned = set()
 
     for lib in libs:
-        if not os.path.isdir(lib):
+        norm_lib = normalize_path(lib)
+        if not norm_lib or not os.path.isdir(norm_lib):
             continue
         try:
-            for entry in os.listdir(lib):
-                full = os.path.join(lib, entry)
+            for entry in os.listdir(norm_lib):
+                full = normalize_path(os.path.join(norm_lib, entry))
                 if os.path.isdir(full):
-                    norm = os.path.normcase(os.path.abspath(full))
-                    if norm not in scanned:
-                        scanned.add(norm)
+                    key = canonical_key(full)
+                    if key and key not in scanned:
+                        scanned.add(key)
                         g = scan_game(full, entry, manifests)
+                        if g.get("exeFolder"):
+                            scanned.add(canonical_key(g["exeFolder"]))
                         if g["route"]:
                             results.append(g)
         except Exception:
             pass
 
     for cfolder in cfg.get("customFolders", []):
-        if os.path.isdir(cfolder):
-            norm = os.path.normcase(os.path.abspath(cfolder))
-            if norm not in scanned:
-                scanned.add(norm)
-                g = scan_game(cfolder, os.path.basename(cfolder.rstrip("/\\")), manifests)
+        norm_cf = normalize_path(cfolder)
+        if norm_cf and os.path.isdir(norm_cf):
+            key = canonical_key(norm_cf)
+            if key and key not in scanned:
+                scanned.add(key)
+                g = scan_game(norm_cf, os.path.basename(norm_cf.rstrip("/\\")), manifests)
+                exe_key = canonical_key(g.get("exeFolder") or "")
+                if exe_key and exe_key != key:
+                    if exe_key in scanned:
+                        continue
+                    scanned.add(exe_key)
                 if g["route"]:
                     results.append(g)
 

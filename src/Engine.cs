@@ -61,9 +61,35 @@ namespace HelixSRSwapper
             return Directory.Exists(@"Z:\home") || Directory.Exists("/home");
         }
 
+        public static string NormalizePath(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+            try
+            {
+                string cleaned = path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+                return Path.GetFullPath(cleaned).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch
+            {
+                return path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+        }
+
+        private static void AddUniqueDir(List<string> list, HashSet<string> seen, string candidate)
+        {
+            if (string.IsNullOrEmpty(candidate)) return;
+            string norm = NormalizePath(candidate);
+            if (!string.IsNullOrEmpty(norm) && Directory.Exists(norm) && seen.Add(norm))
+            {
+                list.Add(norm);
+            }
+        }
+
         public static List<string> GetSteamRoots()
         {
             var roots = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             try
             {
                 using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Valve\Steam"))
@@ -71,14 +97,13 @@ namespace HelixSRSwapper
                     if (k != null)
                     {
                         var p = k.GetValue("SteamPath") as string;
-                        if (!string.IsNullOrEmpty(p) && Directory.Exists(p)) roots.Add(p);
+                        AddUniqueDir(roots, seen, p);
                     }
                 }
             }
             catch { }
 
-            string def = @"C:\Program Files (x86)\Steam";
-            if (Directory.Exists(def) && !roots.Contains(def)) roots.Add(def);
+            AddUniqueDir(roots, seen, @"C:\Program Files (x86)\Steam");
 
             // Linux / SteamOS & Wine Z:\home discovery
             string home = Environment.GetEnvironmentVariable("HOME");
@@ -105,8 +130,7 @@ namespace HelixSRSwapper
             {
                 foreach (var rel in relSteamPaths)
                 {
-                    string cand = Path.Combine(h, rel);
-                    if (Directory.Exists(cand) && !roots.Contains(cand)) roots.Add(cand);
+                    AddUniqueDir(roots, seen, Path.Combine(h, rel));
                 }
             }
 
@@ -119,10 +143,10 @@ namespace HelixSRSwapper
                 {
                     foreach (var d1 in Directory.GetDirectories(mr))
                     {
-                        if (Directory.Exists(Path.Combine(d1, "steamapps")) && !roots.Contains(d1)) roots.Add(d1);
+                        if (Directory.Exists(Path.Combine(d1, "steamapps"))) AddUniqueDir(roots, seen, d1);
                         foreach (var d2 in Directory.GetDirectories(d1))
                         {
-                            if (Directory.Exists(Path.Combine(d2, "steamapps")) && !roots.Contains(d2)) roots.Add(d2);
+                            if (Directory.Exists(Path.Combine(d2, "steamapps"))) AddUniqueDir(roots, seen, d2);
                         }
                     }
                 }
@@ -135,13 +159,10 @@ namespace HelixSRSwapper
         public static List<string> GetSteamLibraries()
         {
             var libs = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var root in GetSteamRoots())
             {
-                string directCommon = Path.Combine(root, "steamapps", "common");
-                if (Directory.Exists(directCommon) && !libs.Contains(directCommon))
-                {
-                    libs.Add(directCommon);
-                }
+                AddUniqueDir(libs, seen, Path.Combine(root, "steamapps", "common"));
 
                 string vdf = Path.Combine(root, "steamapps", "libraryfolders.vdf");
                 if (File.Exists(vdf))
@@ -154,17 +175,14 @@ namespace HelixSRSwapper
                         {
                             string p = m.Groups[1].Value.Replace(@"\\", @"\");
                             string common = Path.Combine(p, "steamapps", "common");
-                            if (Directory.Exists(common) && !libs.Contains(common))
+                            if (Directory.Exists(common))
                             {
-                                libs.Add(common);
+                                AddUniqueDir(libs, seen, common);
                             }
                             else if (p.StartsWith("/") && Directory.Exists(@"Z:" + p.Replace('/', '\\')))
                             {
                                 string wineCommon = Path.Combine(@"Z:" + p.Replace('/', '\\'), "steamapps", "common");
-                                if (Directory.Exists(wineCommon) && !libs.Contains(wineCommon))
-                                {
-                                    libs.Add(wineCommon);
-                                }
+                                AddUniqueDir(libs, seen, wineCommon);
                             }
                         }
                     }
@@ -219,6 +237,7 @@ namespace HelixSRSwapper
 
         public static GameInfo ScanGame(string gameFolder, string fallbackName, Dictionary<string, ManifestInfo> manifests)
         {
+            gameFolder = NormalizePath(gameFolder);
             string folderName = Path.GetFileName(gameFolder);
             ManifestInfo manifest = null;
             if (manifests != null && manifests.ContainsKey(folderName))
@@ -505,13 +524,20 @@ namespace HelixSRSwapper
 
             foreach (var lib in libs)
             {
-                if (!Directory.Exists(lib)) continue;
+                string normLib = NormalizePath(lib);
+                if (string.IsNullOrEmpty(normLib) || !Directory.Exists(normLib)) continue;
                 try
                 {
-                    foreach (var dir in Directory.GetDirectories(lib))
+                    foreach (var dir in Directory.GetDirectories(normLib))
                     {
-                        scanned.Add(dir);
-                        var g = ScanGame(dir, Path.GetFileName(dir), manifests);
+                        string normDir = NormalizePath(dir);
+                        if (string.IsNullOrEmpty(normDir) || !scanned.Add(normDir)) continue;
+
+                        var g = ScanGame(normDir, Path.GetFileName(normDir), manifests);
+                        if (!string.IsNullOrEmpty(g.ExeFolder))
+                        {
+                            scanned.Add(NormalizePath(g.ExeFolder));
+                        }
                         if (!string.IsNullOrEmpty(g.Route))
                         {
                             result.Add(g);
@@ -525,10 +551,17 @@ namespace HelixSRSwapper
             {
                 foreach (var folder in customFolders)
                 {
-                    if (Directory.Exists(folder) && !scanned.Contains(folder))
+                    string normFolder = NormalizePath(folder);
+                    if (!string.IsNullOrEmpty(normFolder) && Directory.Exists(normFolder) && scanned.Add(normFolder))
                     {
-                        scanned.Add(folder);
-                        var g = ScanGame(folder, Path.GetFileName(folder), manifests);
+                        var g = ScanGame(normFolder, Path.GetFileName(normFolder), manifests);
+                        if (!string.IsNullOrEmpty(g.ExeFolder) && !string.Equals(NormalizePath(g.ExeFolder), normFolder, StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (!scanned.Add(NormalizePath(g.ExeFolder)))
+                            {
+                                continue;
+                            }
+                        }
                         if (!string.IsNullOrEmpty(g.Route))
                         {
                             result.Add(g);

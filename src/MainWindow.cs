@@ -521,10 +521,9 @@ namespace HelixSRSwapper
             {
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = "explorer.exe",
-                    Arguments = string.Format("\"{0}\"", folderPath),
-                    WorkingDirectory = Path.GetTempPath(),
-                    UseShellExecute = false
+                    FileName = folderPath,
+                    UseShellExecute = true,
+                    Verb = "open"
                 });
             }
             catch { }

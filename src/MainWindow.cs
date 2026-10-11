@@ -154,11 +154,6 @@ namespace HelixSRSwapper
 
         public MainWindow()
         {
-            try
-            {
-                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | (SecurityProtocolType)768 | SecurityProtocolType.Ssl3;
-            }
-            catch { }
 
             Title = "HelixSR Manager — Neural Upscaler & Game Manager";
             Width = 1320;

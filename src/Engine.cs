@@ -1298,11 +1298,6 @@ namespace HelixSRSwapper
             string root = game.ExeFolder ?? game.Folder;
             if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return;
 
-            try
-            {
-                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072; // TLS 1.2
-            }
-            catch { }
 
             string cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HelixSR", "cache", "reframework");
             Directory.CreateDirectory(cacheDir);

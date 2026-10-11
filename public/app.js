@@ -596,10 +596,12 @@ async function openFolder(folderPath) {
 }
 
 // Drawer Sub Tabs
-document.querySelectorAll('.drawer-tab-btn').forEach(btn => {
+const drawerTabBtns = document.querySelectorAll('.drawer-tab-btn');
+const dtabPanes = document.querySelectorAll('.dtab-pane');
+drawerTabBtns.forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.drawer-tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.dtab-pane').forEach(p => p.classList.remove('active'));
+    drawerTabBtns.forEach(b => b.classList.remove('active'));
+    dtabPanes.forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     const target = document.getElementById(`dtab-${btn.dataset.dtab}`);
     if (target) target.classList.add('active');

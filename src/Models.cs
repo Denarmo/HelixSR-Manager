@@ -24,7 +24,7 @@ namespace HelixSRSwapper
         public string FoundXeLlPath { get; set; }
         public bool HasDlssG { get; set; }
         public string FgMode { get; set; } // "auto", "dlssg_xefg", "dlssg_fsrfg", "dlssg_nukems", "optifg_fsrfg"
-        public string Route { get; set; } // "optiscaler" or "direct"
+        public string Route { get; set; } // "optiscaler", "direct" or "dlss" (experimental HelixSR DLSS loader)
         public string OptiDllName { get; set; } // "dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll", "d3d12.dll", "wininet.dll", "winhttp.dll", "OptiScaler.asi"
         public bool UseFakeNvapi { get; set; }
         public bool InstallReFramework { get; set; }
@@ -35,6 +35,7 @@ namespace HelixSRSwapper
             get
             {
                 if (Route == "direct") return "Direct FSR 3.1";
+                if (Route == "dlss") return "DLSS Loader (Experimental)";
                 if (Route == "optiscaler")
                 {
                     string baseStr = string.Format("OptiScaler ({0})", string.IsNullOrEmpty(OptiDllName) ? "dxgi.dll" : OptiDllName);
@@ -67,7 +68,7 @@ namespace HelixSRSwapper
             Inputs = new List<string>();
             FsrTargets = new List<string>();
             Launcher = "Custom";
-            Version = "1.7.0";
+            Version = Engine.CoreVersion;
             OptiDllName = "dxgi.dll";
             UseFakeNvapi = true;
             FgMode = "auto";
@@ -80,8 +81,10 @@ namespace HelixSRSwapper
         public string CoreDir { get; set; }
         public bool CoreExists { get; set; }
         public bool WeightsBuilt { get; set; }
+        public bool NetworkEmbedded { get; set; } // HelixSR 1.8+: network appended to amd_fidelityfx_dx12.dll
         public long WeightsSize { get; set; }
         public long KernelsSize { get; set; }
+        public long DllSize { get; set; }
         public bool HasPython { get; set; }
         public bool HasDxc { get; set; }
         public string PythonPath { get; set; }

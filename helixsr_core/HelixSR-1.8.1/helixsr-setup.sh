@@ -2,7 +2,7 @@
 # Copyright 2026 lonewolf0622. Licensed under the Apache License, Version 2.0.
 #
 # HelixSR setup for Linux, the only thing to run:
-#   1. the first time (or with --rebuild): builds HelixSR's network (helixsr_weights.bin, helixsr_kernels.pak) from NVIDIA's DLSS 310.7.0 DLL
+#   1. the first time (or with --rebuild): builds HelixSR's network into its DLL (one file) from NVIDIA's DLSS 310.7.0 DLL
 #      (downloaded from NVIDIA's GitHub after you agree, or --dlss <file>);
 #   2. lists your DLSS games and installs HelixSR + OptiScaler into the ones you pick, or removes them again.
 #
@@ -100,7 +100,11 @@ fi
 say "python: $PY"
 
 # --- network: built into nvngx.dll once ---
-if [ "$REBUILD" = 0 ] && [ -s "$TARGET/helixsr_weights.bin" ] && [ -s "$TARGET/helixsr_kernels.pak" ]; then
+# built = the network inside HelixSR's DLL (one-file DLL), or the two separate files of an older setup
+built=0
+[ "$(tail -c 32 "$TARGET/amd_fidelityfx_dx12.dll" 2>/dev/null | head -c 8 | tr -d '\0')" = HXSRNET1 ] && built=1
+[ -s "$TARGET/helixsr_weights.bin" ] && [ -s "$TARGET/helixsr_kernels.pak" ] && built=1
+if [ "$REBUILD" = 0 ] && [ $built = 1 ]; then
     say "the network is already built (--rebuild builds it again)"
 else
 # --- shader compiler: Microsoft's DXC (Windows build) through Proton/Wine ---

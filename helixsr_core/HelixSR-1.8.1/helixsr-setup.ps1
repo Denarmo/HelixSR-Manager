@@ -1,7 +1,7 @@
 # Copyright 2026 lonewolf0622. Licensed under the Apache License, Version 2.0.
 #
 # HelixSR setup for Windows, the only thing to run:
-#   1. the first time (or with -Rebuild): builds HelixSR's network (helixsr_weights.bin, helixsr_kernels.pak) from NVIDIA's DLSS 310.7.0 DLL
+#   1. the first time (or with -Rebuild): builds HelixSR's network into its DLL (one file) from NVIDIA's DLSS 310.7.0 DLL
 #      (downloaded from NVIDIA's GitHub after you agree, or -Dlss <file>);
 #   2. lists your DLSS games and installs HelixSR + OptiScaler into the ones you pick, or removes them again.
 #
@@ -16,7 +16,6 @@ param(
     [switch]$Yes,
     [switch]$Rebuild,
     [switch]$Wave64,
-    [switch]$BuildOnly,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$Folders = @()
 )
 $Target = $PSScriptRoot
@@ -62,9 +61,20 @@ try {
         Remove-Item $whl -Force
     }
 
-    # --- network: built once (helixsr_weights.bin, helixsr_kernels.pak) ---
+    # --- network: built once, into HelixSR's DLL ---
+    # built = the network inside HelixSR's DLL (one-file DLL), or the two separate files of an older setup
     $w = Join-Path $Target 'helixsr_weights.bin'; $k = Join-Path $Target 'helixsr_kernels.pak'
     $built = (Test-Path $w) -and (Test-Path $k) -and ((Get-Item $w).Length -gt 0) -and ((Get-Item $k).Length -gt 0)
+    $dll = Join-Path $Target 'amd_fidelityfx_dx12.dll'
+    if (-not $built -and (Test-Path $dll) -and (Get-Item $dll).Length -gt 32) {
+        $fs = [System.IO.File]::OpenRead($dll)
+        try {
+            $null = $fs.Seek(-32, [System.IO.SeekOrigin]::End)
+            $tag = New-Object byte[] 8
+            $null = $fs.Read($tag, 0, 8)
+            $built = [System.Text.Encoding]::ASCII.GetString($tag) -eq 'HXSRNET1'
+        } finally { $fs.Close() }
+    }
     if ($built -and -not $Rebuild -and -not $Wave64) {
         Say "the network is already built (-Rebuild builds it again)"
     } else {
@@ -89,16 +99,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "setup failed (exit $LASTEXITCODE)" }
     }
 
-    if (-not $BuildOnly) {
-        # --- games ---
-        $inst = @((Resolve-Path $Target).Path)
-        foreach ($f in $Folders) {
-            if (-not (Test-Path $f -PathType Container)) { throw "not a folder: $f" }
-            $inst += @('--folder', (Resolve-Path $f).Path)
-        }
-        & $Py (Join-Path $Here 'setup\helixsr_install.py') @inst
-        if ($LASTEXITCODE -ne 0) { throw "game setup failed (exit $LASTEXITCODE)" }
+    # --- games ---
+    $inst = @((Resolve-Path $Target).Path)
+    foreach ($f in $Folders) {
+        if (-not (Test-Path $f -PathType Container)) { throw "not a folder: $f" }
+        $inst += @('--folder', (Resolve-Path $f).Path)
     }
+    & $Py (Join-Path $Here 'setup\helixsr_install.py') @inst
+    if ($LASTEXITCODE -ne 0) { throw "game setup failed (exit $LASTEXITCODE)" }
 }
 catch {
     Write-Host "[helixsr-setup] error: $_" -ForegroundColor Red

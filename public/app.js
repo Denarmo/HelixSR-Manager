@@ -4,6 +4,13 @@ let currentGame = null;
 let currentView = 'grid';
 let activeLogs = { helixsrLog: '', optiscalerLog: '' };
 let currentLogType = 'helix';
+// Filled from /api/core/status; defaults match the bundled release
+let coreInfo = { version: '1.8.1', appVersion: '1.9.0', dlssLoaderAvailable: true };
+
+function updateVersionTag() {
+  const tag = document.getElementById('app-version-tag');
+  if (tag) tag.textContent = `Manager v${coreInfo.appVersion} · Core v${coreInfo.version}`;
+}
 
 // DOM Elements
 const gamesGrid = document.getElementById('games-grid');
@@ -202,7 +209,7 @@ function renderGames() {
       }
 
       const statusHtml = g.installed
-        ? `<div class="card-status-pill active"><span class="status-dot-sm"></span>HelixSR Active (${g.version || '1.7.0'})</div>`
+        ? `<div class="card-status-pill active"><span class="status-dot-sm"></span>HelixSR Active (${g.version || coreInfo.version})</div>`
         : `<div class="card-status-pill"><span class="status-dot-sm"></span>Not Installed</div>`;
 
       card.innerHTML = `
@@ -229,10 +236,10 @@ function renderGames() {
         <td><strong>${escapeHtml(g.name)}</strong></td>
         <td><span class="badge">${g.launcher}</span></td>
         <td>${g.inputs.map(inp => `<span class="pill-tag ${inp.toLowerCase().replace(' ', '')}">${inp}</span>`).join(' ')}</td>
-        <td>${g.route === 'optiscaler' ? 'OptiScaler (DLSS)' : 'Direct FSR 3.1'}</td>
+        <td>${g.route === 'optiscaler' ? 'OptiScaler (DLSS)' : (g.route === 'dlss' ? 'DLSS Loader (Experimental)' : 'Direct FSR 3.1')}</td>
         <td>
           <span class="badge ${g.installed ? 'badge-success' : ''}">
-            ${g.installed ? `Active (${g.version || '1.7.0'})` : 'Not Installed'}
+            ${g.installed ? `Active (${g.version || coreInfo.version})` : 'Not Installed'}
           </span>
         </td>
         <td style="text-align: right;">
@@ -285,7 +292,16 @@ function populateDrawerMethodOptions(game) {
     sel.appendChild(o);
   }
 
-  const targetVal = game.route === 'direct' ? 'direct' : `optiscaler:${game.optiDllName || 'dxgi.dll'}`;
+  // EXPERIMENTAL (HelixSR 1.8.1): DLSS loader route, only for games with a DLSS input
+  const hasDlssInput = Array.isArray(game.inputs) && game.inputs.includes('DLSS');
+  if ((hasDlssInput && coreInfo.dlssLoaderAvailable) || game.route === 'dlss') {
+    const o = document.createElement('option');
+    o.value = 'dlss';
+    o.textContent = 'DLSS Loader — dxgi.dll + nvngx.dll (EXPERIMENTAL, no OptiScaler)';
+    sel.appendChild(o);
+  }
+
+  const targetVal = game.route === 'direct' ? 'direct' : (game.route === 'dlss' ? 'dlss' : `optiscaler:${game.optiDllName || 'dxgi.dll'}`);
   sel.value = targetVal;
 
   if (fgSel) {
@@ -327,6 +343,8 @@ function updateDrawerMethodSummary() {
   const val = sel ? sel.value : 'direct';
   if (val === 'direct') {
     currentGame.route = 'direct';
+  } else if (val === 'dlss') {
+    currentGame.route = 'dlss';
   } else if (val.startsWith('optiscaler:')) {
     currentGame.route = 'optiscaler';
     currentGame.optiDllName = val.substring('optiscaler:'.length);
@@ -339,6 +357,7 @@ function updateDrawerMethodSummary() {
   currentGame.installReFramework = chkRef ? chkRef.checked : false;
 
   const isOpti = currentGame.route === 'optiscaler';
+  const isDlss = currentGame.route === 'dlss';
   const optiDll = currentGame.optiDllName || 'dxgi.dll';
   if (fgWrap) fgWrap.style.display = isOpti ? 'block' : 'none';
   if (fakeWrap) fakeWrap.style.display = isOpti ? 'flex' : 'none';
@@ -350,12 +369,13 @@ function updateDrawerMethodSummary() {
     optifg_fsrfg: ' + OptiFG'
   };
   const fgTag = isOpti ? (fgMap[currentGame.fgMode] || '') : '';
-  drawerRouteBadge.textContent = isOpti ? `OptiScaler (${optiDll}${fgTag})` : 'Direct (FSR 3.1)';
+  drawerRouteBadge.textContent = isOpti ? `OptiScaler (${optiDll}${fgTag})` : (isDlss ? 'DLSS Loader (Experimental)' : 'Direct (FSR 3.1)');
   if (currentGame.installReFramework) drawerRouteBadge.textContent += ' + REFramework';
 
   // Compute Proton Launch Options
   const dlls = [];
   if (isOpti && optiDll.toLowerCase().endsWith('.dll')) dlls.push(optiDll.slice(0, -4));
+  if (isDlss) dlls.push('dxgi');
   if (currentGame.installReFramework && !dlls.includes('dinput8')) dlls.push('dinput8');
   if (dlls.length > 0 && protonBox && protonCmd) {
     protonBox.style.display = 'block';
@@ -364,7 +384,22 @@ function updateDrawerMethodSummary() {
     protonBox.style.display = 'none';
   }
 
-  if (isOpti) {
+  if (isDlss) {
+    if (hint) hint.textContent = 'EXPERIMENTAL (HelixSR 1.8.1): puts HelixSR\'s DLSS loader (dxgi.dll) and HelixSR as nvngx.dll next to the game .exe, so the game\'s own DLSS option runs HelixSR without OptiScaler. Tested upstream in very few games (Linux/Proton). Existing files are backed up. Never use in online games with anti-cheat (ban risk).';
+    drawerValMethod.textContent = currentGame.installReFramework
+      ? 'DLSS Loader (Experimental) + REFramework Nightly (dinput8.dll)'
+      : 'DLSS Loader (Experimental - dxgi.dll + nvngx.dll)';
+    if (instructionsBox) {
+      instructionsBox.innerHTML = `
+        <ol>
+          <li>Click <strong>Install HelixSR</strong> and confirm the experimental warning.</li>
+          <li>On SteamOS / Linux, paste the <strong>Proton Launch Option</strong> above into Steam game properties.</li>
+          <li>Launch the game and select <strong>NVIDIA DLSS</strong> in Graphics settings - HelixSR runs in its place.</li>
+          <li>If the game does not start or DLSS is missing, uninstall and use the OptiScaler route instead.</li>
+        </ol>
+      `;
+    }
+  } else if (isOpti) {
     let fgNote = '';
     if (currentGame.fgMode === 'dlssg_xefg') fgNote = ' Routes in-game DLSS Frame Generation to Intel XeSS-FG (AI optical flow on AMD/Intel).';
     else if (currentGame.fgMode === 'dlssg_fsrfg') fgNote = ' Routes in-game DLSS Frame Generation to AMD FidelityFX Frame Generation.';
@@ -438,7 +473,7 @@ function openGameDrawer(game) {
   // Update Status Pill
   if (game.installed) {
     drawerStatusBadge.className = 'badge badge-success';
-    drawerStatusBadge.textContent = `HelixSR Installed (${game.version || '1.7.0'})`;
+    drawerStatusBadge.textContent = `HelixSR Installed (${game.version || coreInfo.version})`;
     drawerBtnInstall.className = 'btn btn-secondary';
     drawerInstallText.textContent = 'Reinstall / Update';
     drawerBtnUninstall.style.display = 'inline-flex';
@@ -477,6 +512,12 @@ btnCloseDrawer.addEventListener('click', closeGameDrawer);
 // Drawer Action Handlers
 drawerBtnInstall.addEventListener('click', async () => {
   if (!currentGame) return;
+  if (currentGame.route === 'dlss' && !confirm(
+    'EXPERIMENTAL: DLSS Loader route (HelixSR ' + coreInfo.version + ').\n\n' +
+    'This places HelixSR\'s DLSS loader as dxgi.dll and HelixSR as nvngx.dll next to the game\'s .exe, without OptiScaler. ' +
+    'It is new upstream and may not work in every game.\n\n' +
+    'Do NOT use it in online games with anti-cheat - injected DLLs can get your account banned.\n\nContinue?'
+  )) return;
   drawerBtnInstall.disabled = true;
   drawerInstallText.textContent = 'Installing...';
   try {
@@ -596,10 +637,12 @@ async function openFolder(folderPath) {
 }
 
 // Drawer Sub Tabs
-document.querySelectorAll('.drawer-tab-btn').forEach(btn => {
+const drawerTabBtns = document.querySelectorAll('.drawer-tab-btn');
+const dtabPanes = document.querySelectorAll('.dtab-pane');
+drawerTabBtns.forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.drawer-tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.dtab-pane').forEach(p => p.classList.remove('active'));
+    drawerTabBtns.forEach(b => b.classList.remove('active'));
+    dtabPanes.forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     const target = document.getElementById(`dtab-${btn.dataset.dtab}`);
     if (target) target.classList.add('active');
@@ -708,14 +751,26 @@ async function checkCoreStatus() {
     const valToolchain = document.getElementById('val-toolchain-status');
     const badge = document.getElementById('core-weights-badge');
 
+    if (data.version) coreInfo.version = data.version;
+    if (data.appVersion) coreInfo.appVersion = data.appVersion;
+    if (data.coreDir) coreInfo.coreDir = data.coreDir;
+    if (typeof data.dlssLoaderAvailable === 'boolean') coreInfo.dlssLoaderAvailable = data.dlssLoaderAvailable;
+    updateVersionTag();
+
+    const mb = (n) => `${(n / (1024 * 1024)).toFixed(2)} MB`;
     if (data.weightsBuilt) {
       coreStatusDot.className = 'status-dot active';
       badge.textContent = 'Network Ready';
       badge.className = 'badge badge-success';
       dotWeights.className = 'dot done';
       dotKernels.className = 'dot done';
-      valWeights.textContent = `${(data.weightsSize / (1024 * 1024)).toFixed(2)} MB (Ready)`;
-      valKernels.textContent = `${(data.kernelsSize / (1024 * 1024)).toFixed(2)} MB (Ready)`;
+      if (data.networkEmbedded) {
+        valWeights.textContent = `${mb(data.weightsSize)} (embedded in DLL)`;
+        valKernels.textContent = `${mb(data.kernelsSize)} (embedded in DLL)`;
+      } else {
+        valWeights.textContent = `${mb(data.weightsSize)} (Ready)`;
+        valKernels.textContent = `${mb(data.kernelsSize)} (Ready)`;
+      }
     } else {
       coreStatusDot.className = 'status-dot';
       badge.textContent = 'Compilation Required';
@@ -808,7 +863,12 @@ document.getElementById('btn-clear-console').addEventListener('click', () => {
 });
 
 document.getElementById('btn-open-global-myfsr').addEventListener('click', () => {
-  openFolder('helixsr_core\\HelixSR-1.7.0\\my-fsr');
+  if (coreInfo.coreDir) {
+    const sep = coreInfo.coreDir.includes('/') ? '/' : '\\';
+    openFolder(`${coreInfo.coreDir}${sep}my-fsr`);
+  } else {
+    openFolder(`helixsr_core\\HelixSR-${coreInfo.version}\\my-fsr`);
+  }
 });
 
 // Hardware Diagnostics Tab
@@ -907,6 +967,7 @@ function escapeHtml(str) {
 
 // Initial Initialization
 window.addEventListener('DOMContentLoaded', () => {
+  updateVersionTag();
   loadGames();
   checkCoreStatus();
   loadSidebarGpu();

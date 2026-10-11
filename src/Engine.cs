@@ -1369,13 +1369,14 @@ namespace HelixSRSwapper
                 // Generic DirectX 12 pipeline caches
                 try
                 {
-                    foreach (var f in Directory.GetFiles(dir, "*shader*.bin", SearchOption.TopDirectoryOnly))
+                    foreach (var f in Directory.EnumerateFiles(dir, "*.bin", SearchOption.TopDirectoryOnly))
                     {
-                        try { File.Delete(f); cleared = true; } catch { }
-                    }
-                    foreach (var f in Directory.GetFiles(dir, "*pipeline*.bin", SearchOption.TopDirectoryOnly))
-                    {
-                        try { File.Delete(f); cleared = true; } catch { }
+                        string name = Path.GetFileName(f);
+                        if (name.IndexOf("shader", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            name.IndexOf("pipeline", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            try { File.Delete(f); cleared = true; } catch { }
+                        }
                     }
                 }
                 catch { }

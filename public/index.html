@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HelixSR Manager — Neural Upscaler & Game Manager</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23f1c40f'/%3E%3Cstop offset='100%25' stop-color='%23f39c12'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='2' y='2' width='60' height='60' rx='15' fill='url(%23g)'/%3E%3Cpath d='M36 10L16 35h14l-5 19 23-26H34z' fill='%230a0c10'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body class="dark-theme">
+  <div id="app" class="app-layout">
+    <!-- Left Navigation Rail -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <span class="brand-title">Helix<span class="highlight">SR</span></span>
+            <span class="brand-subtitle">Manager</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-tab="games">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="6" width="20" height="12" rx="2"/>
+            <circle cx="8" cy="12" r="2"/>
+            <path d="M15 12h2M16 11v2"/>
+          </svg>
+          <span>Games Library</span>
+          <span class="badge" id="games-count-badge">0</span>
+        </button>
+
+        <button class="nav-item" data-tab="core">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          <span>Engine & Weights</span>
+          <span class="status-dot" id="core-status-dot" title="Network status"></span>
+        </button>
+
+        <button class="nav-item" data-tab="myfsr">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+            <line x1="12" y1="22.08" x2="12" y2="12"/>
+          </svg>
+          <span>Custom FSR (my-fsr)</span>
+        </button>
+
+        <button class="nav-item" data-tab="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          <span>Settings</span>
+        </button>
+
+        <button class="nav-item" data-tab="about">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <span>Diagnostics & About</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="gpu-pill" id="sidebar-gpu-pill" title="Detected GPU">
+          <span class="gpu-indicator"></span>
+          <span class="gpu-name" id="sidebar-gpu-text">Detecting GPU...</span>
+        </div>
+        <div class="version-tag">HelixSR Core v1.7.0</div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Top Control Bar (Search, Filters, Actions) -->
+      <header class="topbar">
+        <div class="topbar-search">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="text" id="search-input" placeholder="Search games by title..." autocomplete="off">
+          <button id="clear-search" class="clear-btn" style="display:none;">&times;</button>
+        </div>
+
+        <div class="topbar-filters">
+          <select id="filter-launcher" class="filter-select" title="Filter by Launcher">
+            <option value="all">All Launchers</option>
+            <option value="Steam">Steam</option>
+            <option value="Custom">Custom</option>
+          </select>
+
+          <select id="filter-status" class="filter-select" title="Filter by Status">
+            <option value="all">All Status</option>
+            <option value="installed">HelixSR Installed</option>
+            <option value="not-installed">Not Installed</option>
+            <option value="optiscaler">OptiScaler (DLSS)</option>
+            <option value="direct">Direct FSR 3.1</option>
+          </select>
+
+          <select id="sort-select" class="filter-select" title="Sort by">
+            <option value="name-asc">Name (A-Z)</option>
+            <option value="name-desc">Name (Z-A)</option>
+            <option value="status">Installed First</option>
+          </select>
+        </div>
+
+        <div class="topbar-actions">
+          <button id="btn-add-game" class="btn btn-secondary" title="Manually add game folder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            <span>Add Game</span>
+          </button>
+
+          <button id="btn-refresh" class="btn btn-secondary" title="Scan libraries for games">
+            <svg class="spin-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 4v6h-6M1 20v-6h6"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            <span>Refresh</span>
+          </button>
+
+          <div class="view-toggle">
+            <button id="btn-view-grid" class="view-btn active" title="Poster Grid View">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7"/>
+                <rect x="14" y="3" width="7" height="7"/>
+                <rect x="14" y="14" width="7" height="7"/>
+                <rect x="3" y="14" width="7" height="7"/>
+              </svg>
+            </button>
+            <button id="btn-view-list" class="view-btn" title="Detailed List View">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="8" y1="6" x2="21" y2="6"/>
+                <line x1="8" y1="12" x2="21" y2="12"/>
+                <line x1="8" y1="18" x2="21" y2="18"/>
+                <line x1="3" y1="6" x2="3.01" y2="6"/>
+                <line x1="3" y1="12" x2="3.01" y2="12"/>
+                <line x1="3" y1="18" x2="3.01" y2="18"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <!-- View Containers -->
+      <section class="content-body">
+        <!-- 1. Games Tab -->
+        <div id="tab-games" class="tab-pane active">
+          <!-- Summary Banner -->
+          <div class="library-banner">
+            <div class="banner-info">
+              <h2 id="library-headline">Installed Games Supporting HelixSR</h2>
+              <p id="library-subtext">Drop-in DLSS Model E neural upscaler for Direct3D 12 on AMD GPUs.</p>
+            </div>
+            <div class="banner-actions">
+              <button id="btn-install-all" class="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                <span>Install All</span>
+              </button>
+              <button id="btn-uninstall-all" class="btn btn-outline-danger">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+                <span>Uninstall All</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Empty State -->
+          <div id="games-empty" class="empty-state" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <h3>No matching games found</h3>
+            <p>Try clearing your search query or filters, or add a custom game folder using "Add Game".</p>
+          </div>
+
+          <!-- Loading State -->
+          <div id="games-loading" class="loading-state">
+            <div class="spinner"></div>
+            <p>Scanning Steam libraries and detected directories...</p>
+          </div>
+
+          <!-- Game Cards Grid -->
+          <div id="games-grid" class="games-grid"></div>
+
+          <!-- Game List Table -->
+          <div id="games-list" class="games-list" style="display:none;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="width: 60px;">Cover</th>
+                  <th>Game Title</th>
+                  <th>Launcher</th>
+                  <th>Detected Inputs</th>
+                  <th>Injection Route</th>
+                  <th>HelixSR Status</th>
+                  <th style="text-align: right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="games-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 2. Engine & Weights Tab -->
+        <div id="tab-core" class="tab-pane">
+          <div class="panel-header">
+            <h2>HelixSR Core & Network Weights</h2>
+            <p>HelixSR runs NVIDIA's DLSS Model E neural network as pure Direct3D 12 compute shaders. To comply with NVIDIA licenses, the network weights and DXIL shaders must be built locally once.</p>
+          </div>
+
+          <div class="cards-layout">
+            <!-- Weights Status Card -->
+            <div class="card status-card">
+              <div class="card-header">
+                <h3>Network Files Status</h3>
+                <span class="badge" id="core-weights-badge">Checking...</span>
+              </div>
+              <div class="status-items">
+                <div class="status-row">
+                  <div class="status-label">
+                    <span class="dot" id="dot-weights"></span>
+                    <strong>helixsr_weights.bin</strong>
+                    <span class="sub">(FP32 tensors extracted from DLSS)</span>
+                  </div>
+                  <div class="status-val" id="val-weights-size">-</div>
+                </div>
+                <div class="status-row">
+                  <div class="status-label">
+                    <span class="dot" id="dot-kernels"></span>
+                    <strong>helixsr_kernels.pak</strong>
+                    <span class="sub">(DXIL compute shaders)</span>
+                  </div>
+                  <div class="status-val" id="val-kernels-size">-</div>
+                </div>
+                <div class="status-row">
+                  <div class="status-label">
+                    <span class="dot" id="dot-toolchain"></span>
+                    <strong>Local Toolchain</strong>
+                    <span class="sub">(Python 3.14 embed, numpy, DXC compiler)</span>
+                  </div>
+                  <div class="status-val" id="val-toolchain-status">-</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Network Compiler Wizard Card -->
+            <div class="card builder-card">
+              <div class="card-header">
+                <h3>Network Compiler Wizard</h3>
+                <span class="pill-tech">DLSS 310.7.0</span>
+              </div>
+              <p class="card-description">
+                HelixSR extracts Model E weights from NVIDIA's official DLSS 310.7.0 DLL and compiles HLSL compute shaders using Microsoft's DirectX Shader Compiler (DXC).
+              </p>
+
+              <div class="form-group">
+                <label for="dlss-source-select">DLSS Source (nvngx_dlss.dll):</label>
+                <select id="dlss-source-select" class="form-input">
+                  <option value="">Download automatically from NVIDIA GitHub</option>
+                </select>
+                <div class="input-hint" id="dlss-detected-hint">Detected DLSS 310.7.0 found in your installed games!</div>
+              </div>
+
+              <div class="form-group checkbox-group">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="check-wave64">
+                  <span>Compile Wave64 shaders (--wave64)</span>
+                </label>
+                <p class="checkbox-hint">Enables extra 64-lane waves for AMD RDNA 3 and newer GPUs (Radeon RX 7000 series / BC-250 / APUs).</p>
+              </div>
+
+              <div class="builder-actions">
+                <button id="btn-start-build" class="btn btn-primary btn-lg">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                  </svg>
+                  <span>Build HelixSR Network</span>
+                </button>
+              </div>
+
+              <!-- Live Compilation Console -->
+              <div class="console-box" id="build-console">
+                <div class="console-header">
+                  <span>Compilation Output</span>
+                  <button id="btn-clear-console" class="clear-console-btn">Clear</button>
+                </div>
+                <pre id="console-output" class="console-content">Ready to compile. Press "Build HelixSR Network" to start.</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Custom FSR (my-fsr) Tab -->
+        <div id="tab-myfsr" class="tab-pane">
+          <div class="panel-header">
+            <h2>Custom FSR & FidelityFX Manager</h2>
+            <p>With HelixSR's OptiScaler integration, you can also inject custom AMD FidelityFX DLLs (such as FSR 4.1.1) side-by-side with HelixSR!</p>
+          </div>
+
+          <div class="cards-layout">
+            <div class="card">
+              <h3>How Custom FSR Works</h3>
+              <p class="guide-text">
+                When a game is installed via OptiScaler mode, a <code>HelixSR/my-fsr</code> folder is created inside the game's executable directory. Any FidelityFX upscaler DLL placed into that folder is dynamically exposed in the in-game OptiScaler overlay!
+              </p>
+              <div class="steps-list">
+                <div class="step-item">
+                  <div class="step-num">1</div>
+                  <div class="step-info">
+                    <strong>Launch your game</strong> with HelixSR installed.
+                  </div>
+                </div>
+                <div class="step-item">
+                  <div class="step-num">2</div>
+                  <div class="step-info">
+                    <strong>Press the <kbd>Insert</kbd> key</strong> to open the in-game OptiScaler HUD overlay.
+                  </div>
+                </div>
+                <div class="step-item">
+                  <div class="step-num">3</div>
+                  <div class="step-info">
+                    Navigate to <strong>Upscaling tab &rarr; Upscalers &rarr; FFX Upscaler</strong>.
+                  </div>
+                </div>
+                <div class="step-item">
+                  <div class="step-num">4</div>
+                  <div class="step-info">
+                    Switch between <strong>FSR HelixSR (3.1.5)</strong> (default) and any custom FSR DLL (e.g. FSR 4.1.1) in real-time!
+                  </div>
+                </div>
+              </div>
+              <div class="card-footer-action">
+                <button id="btn-open-global-myfsr" class="btn btn-secondary">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  <span>Open Core my-fsr Folder</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Settings Tab -->
+        <div id="tab-settings" class="tab-pane">
+          <div class="panel-header">
+            <h2>Settings & Scan Locations</h2>
+            <p>Configure library scanning paths and app preferences.</p>
+          </div>
+
+          <div class="cards-layout">
+            <div class="card">
+              <h3>Detected Steam Libraries</h3>
+              <ul class="directory-list" id="settings-steam-libs">
+                <li>Detecting...</li>
+              </ul>
+            </div>
+
+            <div class="card">
+              <h3>Add Custom Game Directory</h3>
+              <p class="card-description">Add standalone game directories or DRM-free titles that do not live in your Steam libraries.</p>
+              <div class="add-folder-row">
+                <input type="text" id="custom-folder-input" class="form-input" placeholder="e.g. D:\Games\MyGame">
+                <button id="btn-save-custom-folder" class="btn btn-primary">Add Folder</button>
+              </div>
+              <div class="custom-folders-list" id="custom-folders-container"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. About & Diagnostics Tab -->
+        <div id="tab-about" class="tab-pane">
+          <div class="panel-header">
+            <h2>Diagnostics & Hardware Info</h2>
+            <p>Verify GPU compatibility and system capabilities for HelixSR.</p>
+          </div>
+
+          <div class="cards-layout">
+            <div class="card">
+              <h3>Hardware & Graphics Adapters</h3>
+              <div id="diagnostics-gpus-list" class="gpu-details-list">
+                <p>Loading GPU details...</p>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3>About HelixSR Manager</h3>
+              <div class="about-content">
+                <p><strong>HelixSR</strong> is an unofficial community project by <code>lonewolf0622</code> that acts as a drop-in FSR 3.1 replacement for Direct3D 12 games, executing NVIDIA's DLSS Model E neural network using standard compute shaders on AMD GPUs (RDNA 1, RDNA 2, RDNA 3, RDNA 4).</p>
+                <p><strong>HelixSR Manager</strong> provides a high-performance desktop management interface for Windows and Linux (SteamOS), allowing PC gamers to inspect, install, update, and manage HelixSR mods across all their installed titles.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Game Inspector Drawer (Slide-in from right) -->
+    <div id="drawer-backdrop" class="drawer-backdrop"></div>
+    <aside id="game-drawer" class="game-drawer">
+      <div class="drawer-banner-wrap">
+        <div id="drawer-hero-img" class="drawer-hero-img"></div>
+        <button id="btn-close-drawer" class="drawer-close-btn">&times;</button>
+        <div class="drawer-header-overlay">
+          <div class="drawer-cover-thumb">
+            <img id="drawer-thumb" src="" alt="Game Poster">
+          </div>
+          <div class="drawer-title-meta">
+            <h2 id="drawer-game-title">Game Title</h2>
+            <div class="drawer-meta-badges">
+              <span id="drawer-platform-badge" class="badge">Steam</span>
+              <span id="drawer-route-badge" class="badge">OptiScaler</span>
+              <span id="drawer-status-badge" class="badge badge-success">Installed</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="drawer-body">
+        <!-- Installation Method & Hooks Box -->
+        <div class="drawer-section" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 14px; margin-bottom: 14px;">
+          <h3 style="color: #f1c40f; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px;">Installation Method &amp; Hooks</h3>
+          <select id="drawer-install-method" class="form-input" style="width: 100%; margin-bottom: 8px;"></select>
+          <p id="drawer-method-hint" style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4;"></p>
+          <label id="drawer-fakenvapi-wrap" class="checkbox-label" style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; margin-bottom: 6px; cursor: pointer;">
+            <input type="checkbox" id="drawer-chk-fakenvapi" checked>
+            <span>Deploy FakeNVAPI (<code>fakenvapi.dll</code>) to unlock DLSS on AMD/Intel GPUs</span>
+          </label>
+          <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; cursor: pointer;">
+            <input type="checkbox" id="drawer-chk-reframework">
+            <span>Install REFramework Nightly (<code>dinput8.dll</code>) for Capcom RE Engine</span>
+          </label>
+          <div id="drawer-proton-box" style="margin-top: 10px; padding: 8px 10px; background: rgba(57, 213, 255, 0.08); border: 1px solid rgba(57, 213, 255, 0.25); border-radius: 8px; display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 0.72rem; font-weight: 600; color: #39d5ff;">STEAM DECK / STEAMOS PROTON LAUNCH OPTION</span>
+              <button id="drawer-btn-copy-proton" class="btn btn-sm btn-ghost" style="padding: 2px 8px; font-size: 0.72rem;">Copy</button>
+            </div>
+            <code id="drawer-proton-cmd" class="font-mono" style="font-size: 0.76rem; color: #f3f6fb; user-select: all;"></code>
+          </div>
+        </div>
+
+        <!-- Quick Action Buttons -->
+        <div class="drawer-actions-bar">
+          <button id="drawer-btn-install" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span id="drawer-install-text">Install HelixSR</span>
+          </button>
+
+          <button id="drawer-btn-uninstall" class="btn btn-outline-danger">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            <span>Restore / Uninstall</span>
+          </button>
+
+          <button id="drawer-btn-launch" class="btn btn-secondary" title="Launch Game">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            <span>Launch</span>
+          </button>
+        </div>
+
+        <!-- Folders Shortcuts -->
+        <div class="shortcuts-row">
+          <button id="drawer-btn-open-game" class="btn btn-sm btn-ghost">
+            <span>📁 Game Folder</span>
+          </button>
+          <button id="drawer-btn-open-backup" class="btn btn-sm btn-ghost">
+            <span>📂 Backups</span>
+          </button>
+          <button id="drawer-btn-open-myfsr" class="btn btn-sm btn-ghost">
+            <span>📦 my-fsr</span>
+          </button>
+          <button id="drawer-btn-clear-cache" class="btn btn-sm btn-ghost" title="Clear shader.cache2 &amp; Proton DXVK/VKD3D shader cache">
+            <span>🧹 Clear Cache</span>
+          </button>
+        </div>
+
+        <!-- Game Properties Detail -->
+        <div class="drawer-section">
+          <h3>Game Details</h3>
+          <div class="props-grid">
+            <div class="prop-item">
+              <span class="prop-label">Executable:</span>
+              <span class="prop-val font-mono" id="drawer-val-exe">-</span>
+            </div>
+            <div class="prop-item">
+              <span class="prop-label">Directory:</span>
+              <span class="prop-val font-mono truncate" id="drawer-val-path" title="">-</span>
+            </div>
+            <div class="prop-item">
+              <span class="prop-label">Supported APIs:</span>
+              <span class="prop-val" id="drawer-val-inputs">-</span>
+            </div>
+            <div class="prop-item">
+              <span class="prop-label">Injection Method:</span>
+              <span class="prop-val" id="drawer-val-method">-</span>
+            </div>
+            <div class="prop-item">
+              <span class="prop-label">Backup Protection:</span>
+              <span class="prop-val" id="drawer-val-backup">Automatic</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Drawer Sub Tabs (Instructions, Logs, OptiScaler INI) -->
+        <div class="drawer-tabs">
+          <button class="drawer-tab-btn active" data-dtab="instructions">Instructions</button>
+          <button class="drawer-tab-btn" data-dtab="ini">OptiScaler.ini</button>
+          <button class="drawer-tab-btn" data-dtab="logs">Game Logs</button>
+        </div>
+
+        <div class="drawer-tab-content">
+          <!-- Instructions Tab -->
+          <div id="dtab-instructions" class="dtab-pane active">
+            <div class="guide-box" id="drawer-instructions-box">
+              <ol>
+                <li>Install HelixSR using the button above.</li>
+                <li>Launch the game and navigate to Graphics / Video settings.</li>
+                <li>Select <strong>NVIDIA DLSS</strong> (or AMD FSR for direct route games).</li>
+                <li>Press <kbd>Insert</kbd> to bring up the OptiScaler overlay to verify HelixSR (3.1.5).</li>
+              </ol>
+            </div>
+          </div>
+
+          <!-- OptiScaler.ini Tab -->
+          <div id="dtab-ini" class="dtab-pane">
+            <div class="ini-editor-wrap">
+              <div class="ini-actions">
+                <span>OptiScaler.ini Editor</span>
+                <button id="btn-save-ini" class="btn btn-sm btn-primary">Save Changes</button>
+              </div>
+              <textarea id="ini-editor-text" class="font-mono" spellcheck="false" placeholder="No OptiScaler.ini file found for this game."></textarea>
+            </div>
+          </div>
+
+          <!-- Logs Tab -->
+          <div id="dtab-logs" class="dtab-pane">
+            <div class="logs-wrap">
+              <div class="log-switch">
+                <button class="log-tab-btn active" data-logtype="helix">helixsr.log</button>
+                <button class="log-tab-btn" data-logtype="opti">OptiScaler.log</button>
+                <button id="btn-refresh-logs" class="btn btn-sm btn-ghost">Refresh Logs</button>
+              </div>
+              <pre id="log-output-text" class="console-content font-mono">No log output yet. Launch the game to generate logs.</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Global Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

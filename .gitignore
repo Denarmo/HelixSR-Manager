@@ -1,0 +1,18 @@
+# Build distributions & release zip archives (uploaded via GitHub Releases)
+build/
+
+# User-local configuration
+config.json
+
+# Locally compiled NVIDIA DLSS Model E network weights & shader packages
+# IMPORTANT: Per NVIDIA's license and the HelixSR Freeware License (Section 4),
+# these files are generated locally on the user's PC and must NOT be shared or redistributed.
+**/helixsr_weights.bin
+**/helixsr_kernels.pak
+**/helixsr_setup.json
+**/manual-install/
+
+# Python bytecode & runtime logs
+**/__pycache__/
+*.pyc
+*.log

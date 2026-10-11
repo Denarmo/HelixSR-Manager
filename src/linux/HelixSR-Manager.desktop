@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=HelixSR Manager
+Comment=DLSS Model E Neural Upscaler & Game Manager for Linux & SteamOS
+Exec=sh -c 'cd "$(dirname "%k")" && ./HelixSR-Manager.sh'
+Icon=utilities-terminal
+Terminal=true
+Categories=Game;Utility;
+StartupNotify=true

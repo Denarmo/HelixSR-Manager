@@ -1,0 +1,17 @@
+{
+  "name": "helixsr-manager",
+  "version": "1.0.0",
+  "description": "HelixSR Manager",
+  "license": "MIT",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Denarmo/HelixSR-Manager.git"
+  },
+  "devDependencies": {
+    "jest": "^30.0.0",
+    "jest-environment-jsdom": "^30.0.0"
+  }
+}

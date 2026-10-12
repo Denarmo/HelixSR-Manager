@@ -1,0 +1,99 @@
+MIT License (Fork Modifications & Additions)
+
+================================================================================
+OWNERSHIP & FORK NOTICE
+================================================================================
+
+This repository is an open-source community fork. Denarmo is not the original
+author or sole owner of the foundational codebase from which this project was
+forked.
+
+- All pre-existing, upstream, and third-party code retains its original
+  copyright, ownership, and licenses as established by the original authors.
+- Copyright in modifications, improvements, bug fixes, refactoring, new features,
+  and additions created in this fork:
+  Copyright (c) 2026 Denarmo and project contributors.
+
+================================================================================
+GRANT OF PERMISSION — FORK CONTRIBUTIONS MAY BE USED BY OTHERS
+================================================================================
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software, user interface, management engine, packaging scripts, and
+associated documentation files (the "Software"), specifically including all
+code, modifications, improvements, and additions authored by Denarmo and
+contributors to this fork, to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice, this ownership and fork notice, the permission
+notice, and the third-party component notices below shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+AGGREGATED THIRD-PARTY COMPONENTS & SEPARATE LICENSES
+================================================================================
+
+This repository and its release distributions aggregate unmodified third-party
+software inside `helixsr_core/HelixSR-1.8.1/`. Each component remains the
+property of its respective copyright holder(s) and is governed strictly by its
+own license:
+
+1. HelixSR Core Runtime (`helixsr_core/HelixSR-1.8.1/amd_fidelityfx_dx12.dll`) and the
+   experimental HelixSR DLSS loader (`helixsr_core/HelixSR-1.8.1/dlss-loader/dxgi.dll`)
+   - Copyright (c) 2026 lonewolf0622. All rights reserved.
+   - Governed by the HelixSR Freeware License:
+     `helixsr_core/HelixSR-1.8.1/LICENSE`
+   - Redistributed complete, unmodified, and free of charge in accordance with
+     Section 2 of the HelixSR Freeware License.
+   - Upstream project: https://github.com/lonewolf0622/HelixSR
+
+2. HelixSR Setup & Compiler Scripts (`helixsr_core/HelixSR-1.8.1/setup/`,
+   `helixsr-setup.*`, `helixsr-uninstall.*`)
+   - Copyright (c) 2026 lonewolf0622.
+   - Licensed under the Apache License, Version 2.0:
+     `helixsr_core/HelixSR-1.8.1/LICENSE-APACHE-2.0`
+
+3. OptiScaler (`helixsr_core/HelixSR-1.8.1/optiscaler/OptiScaler.dll`,
+   `OptiScaler.ini`)
+   - Unmodified official release v0.9.4.
+   - Licensed under the GNU General Public License v3.0 (GPL-3.0):
+     `helixsr_core/HelixSR-1.8.1/optiscaler/LICENSE-GPL-3.0.txt`
+   - OptiScaler is distributed as an independent, separate program (mere
+     aggregation). Neither HelixSR nor HelixSR Manager is linked with or
+     derivative of OptiScaler.
+   - Upstream project: https://github.com/OptiScaler/OptiScaler
+
+4. fakenvapi (`helixsr_core/HelixSR-1.8.1/optiscaler/fakenvapi.dll`,
+   `fakenvapi.ini`)
+   - Unmodified official release by FakeMichau.
+   - Licensed under the MIT License:
+     `helixsr_core/HelixSR-1.8.1/optiscaler/fakenvapi-LICENSE.txt`
+   - Upstream project: https://github.com/FakeMichau/fakenvapi
+
+5. AMD FidelityFX Upscaler & Frame Generation (`helixsr_core/HelixSR-1.8.1/amd-fsr/amd_fidelityfx_upscaler_dx12.dll`,
+   `amd_fidelityfx_framegeneration_dx12.dll`)
+   - Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+   - Unmodified binaries v4.1.1 redistributed under the AMD FidelityFX License:
+     `helixsr_core/HelixSR-1.8.1/amd-fsr/FidelityFX_v2_LICENSE.md`
+   - AMD FidelityFX Lanczos weight approximation routines under the MIT License:
+     `helixsr_core/HelixSR-1.8.1/THIRD_PARTY_NOTICES.md`
+
+6. NVIDIA DLSS Material (NOT INCLUDED)
+   - Neither this repository nor its release packages include NVIDIA's DLSS
+     software (`nvngx_dlss.dll`), neural network weights (`helixsr_weights.bin`),
+     or compiled kernel packages (`helixsr_kernels.pak`).
+   - Those files are built locally on the end user's computer from NVIDIA's
+     DLSS DLL obtained by the user under NVIDIA's license, remain the sole
+     property of NVIDIA Corporation, are not covered by any license in this
+     repository, and MUST NOT be shared, uploaded, or redistributed.

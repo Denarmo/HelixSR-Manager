@@ -27,7 +27,7 @@ PUBLIC_DIR = os.path.join(APP_DIR, "public")
 if not os.path.isdir(PUBLIC_DIR):
     PUBLIC_DIR = os.path.abspath(os.path.join(APP_DIR, "..", "..", "public"))
 
-APP_VERSION = "1.0.0"   # HelixSR Manager release
+APP_VERSION = "1.1.0"   # HelixSR Manager release
 CORE_VERSION = "1.8.1"  # bundled upstream HelixSR core (helixsr_core/HelixSR-x.y.z)
 
 CORE_DIR = os.path.join(APP_DIR, "helixsr_core", f"HelixSR-{CORE_VERSION}")
@@ -1316,6 +1316,120 @@ def get_gpu_info():
     return gpus
 
 
+def detect_handheld_environment():
+    """
+    Detects if the environment is a handheld (SteamOS, Bazzite, Gamescope, or Windows Xbox Mode / Handheld).
+    Returns dict: { isHandheld, isSteamOS, isBazzite, isXboxMode, reason, device }
+    """
+    info = {
+        "isHandheld": False,
+        "isSteamOS": False,
+        "isBazzite": False,
+        "isXboxMode": False,
+        "reason": "",
+        "device": "",
+    }
+
+    # 1. Environment variables
+    if os.environ.get("STEAM_DECK") == "1" or os.environ.get("SteamGamepadUI") == "1":
+        info["isHandheld"] = True
+        info["isSteamOS"] = True
+        info["reason"] = "Steam Deck environment variable active"
+        info["device"] = "Steam Deck"
+        return info
+
+    xdg_desk = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+    session = os.environ.get("DESKTOP_SESSION", "").lower()
+    if "gamescope" in xdg_desk or "gamescope" in session or "steamos" in xdg_desk or "steamos" in session:
+        info["isHandheld"] = True
+        info["isSteamOS"] = True
+        info["reason"] = "Gamescope / SteamOS session active"
+        info["device"] = "SteamOS Handheld"
+        return info
+
+    if os.environ.get("XBOX_MODE") == "1" or os.environ.get("HELIXSR_HANDHELD") == "1":
+        info["isHandheld"] = True
+        info["isXboxMode"] = True
+        info["reason"] = "Xbox / Handheld environment variable active"
+        info["device"] = "Xbox Handheld Mode"
+        return info
+
+    # 2. Check /etc/os-release or /usr/lib/os-release
+    for os_file in ("/etc/os-release", "/usr/lib/os-release"):
+        if os.path.isfile(os_file):
+            try:
+                with open(os_file, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read().lower()
+                    if "id=steamos" in content or 'id="steamos"' in content or "id_like=steamos" in content or "variant_id=steamdeck" in content:
+                        info["isHandheld"] = True
+                        info["isSteamOS"] = True
+                        info["reason"] = "SteamOS distribution detected"
+                        info["device"] = "SteamOS Handheld"
+                        return info
+                    if "id=bazzite" in content or 'id="bazzite"' in content or "id_like=bazzite" in content:
+                        info["isHandheld"] = True
+                        info["isBazzite"] = True
+                        info["reason"] = "Bazzite distribution detected"
+                        info["device"] = "Bazzite Handheld"
+                        return info
+                    if "steamos" in content:
+                        info["isHandheld"] = True
+                        info["isSteamOS"] = True
+                        info["reason"] = "SteamOS distribution detected"
+                        info["device"] = "SteamOS"
+                        return info
+                    if "bazzite" in content:
+                        info["isHandheld"] = True
+                        info["isBazzite"] = True
+                        info["reason"] = "Bazzite distribution detected"
+                        info["device"] = "Bazzite"
+                        return info
+            except Exception:
+                pass
+
+    # 3. Check DMI product name for Steam Deck or known handhelds
+    for dmi_path in ("/sys/devices/virtual/dmi/id/product_name", "/sys/class/dmi/id/product_name"):
+        if os.path.isfile(dmi_path):
+            try:
+                with open(dmi_path, "r", encoding="utf-8", errors="ignore") as f:
+                    dmi = f.read().strip().lower()
+                    if "jupiter" in dmi or "galileo" in dmi or "steam deck" in dmi:
+                        info["isHandheld"] = True
+                        info["isSteamOS"] = True
+                        info["reason"] = f"Steam Deck hardware detected ({dmi})"
+                        info["device"] = "Steam Deck"
+                        return info
+                    for h_name in ("rog ally", "legion go", "claw", "ayaneo", "gpd", "onexplayer", "aokzoe"):
+                        if h_name in dmi:
+                            info["isHandheld"] = True
+                            info["reason"] = f"Handheld hardware detected ({dmi})"
+                            info["device"] = dmi
+                            return info
+            except Exception:
+                pass
+
+    # 4. Check Windows Registry if running Python on Windows
+    if os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\GamingConfiguration") as k:
+                for val_name in ("GamingHomeApp", "EnterGamingPostureOnStartup", "GamingPosture", "XboxMode"):
+                    try:
+                        v, _ = winreg.QueryValueEx(k, val_name)
+                        if v:
+                            info["isHandheld"] = True
+                            info["isXboxMode"] = True
+                            info["reason"] = "Windows Xbox Mode (Full Screen Experience) active"
+                            info["device"] = "Xbox Handheld Experience"
+                            return info
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    return info
+
+
 def open_folder_native(path_str):
     if not path_str or not os.path.exists(path_str):
         return {"success": False, "error": "Folder does not exist"}
@@ -1515,6 +1629,7 @@ class SwapperRequestHandler(BaseHTTPRequestHandler):
             games = scan_all_games()
             cands = [{"game": g["name"], "path": g["foundNvngxDlssPath"]} for g in games if g.get("foundNvngxDlssPath")]
             st["dlssCandidates"] = cands
+            st["handheld"] = detect_handheld_environment()
             return self._send_json(200, st)
 
         if pathname == "/api/system/info":
@@ -1524,6 +1639,7 @@ class SwapperRequestHandler(BaseHTTPRequestHandler):
                 "gpus": get_gpu_info(),
                 "steamLibraries": get_steam_libraries(),
                 "customFolders": load_config().get("customFolders", []),
+                "handheld": detect_handheld_environment(),
             })
 
         if pathname == "/api/games/logs":

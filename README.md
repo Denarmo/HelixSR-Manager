@@ -1,6 +1,6 @@
 # ⚡ HelixSR Manager
 
-[![Release](https://img.shields.io/badge/Release-v1.0.0-F1C40F?style=for-the-badge)](https://github.com/Denarmo/HelixSR-Manager/releases)
+[![Release](https://img.shields.io/badge/Release-v1.1.0-F1C40F?style=for-the-badge)](https://github.com/Denarmo/HelixSR-Manager/releases)
 [![HelixSR Core](https://img.shields.io/badge/HelixSR_Core-v1.8.1-39D5FF?style=for-the-badge)](https://github.com/lonewolf0622/HelixSR)
 [![Platform](https://img.shields.io/badge/Platform-Windows_10%2F11_%7C_Linux_%26_SteamOS-10B981?style=for-the-badge)](#%EF%B8%8F-installation--quick-start)
 [![Dependencies](https://img.shields.io/badge/Dependencies-Zero_(100%25_Standalone)-8B5CF6?style=for-the-badge)](#%EF%B8%8F-installation--quick-start)
@@ -23,17 +23,18 @@
 ## 📑 Table of Contents
 
 1. [✨ Key Features](#-key-features)
-2. [🧠 How It Works (Architecture & Injection Routes)](#-how-it-works-architecture--injection-routes)
-3. [⬇️ Installation & Quick Start](#%EF%B8%8F-installation--quick-start)
-4. [📖 Step-by-Step Usage Guide](#-step-by-step-usage-guide)
-5. [🎞️ DLSS Frame Generation (`DLSS-G`) Hook & Translation](#%EF%B8%8F-dlss-frame-generation-dlss-g-hook--translation)
-6. [🔄 Switching Between HelixSR & Custom FSR (`my-fsr`)](#-switching-between-helixsr--custom-fsr-my-fsr)
-7. [🛠️ Building from Source](#%EF%B8%8F-building-from-source)
-8. [📂 Repository Structure](#-repository-structure)
-9. [🔧 Troubleshooting & FAQ](#-troubleshooting--faq)
-10. [🙏 Referenced Projects, Credits & Acknowledgments](#-referenced-projects-credits--acknowledgments)
-11. [⚖️ Legal Disclaimers, Licensing & Third-Party Notices](#%EF%B8%8F-legal-disclaimers-licensing--third-party-notices)
-12. [☕ Support & 💬 Contact](#-support--contact)
+2. [🎮 Handheld Mode & Full Controller Navigation](#-handheld-mode--full-controller-navigation)
+3. [🧠 How It Works (Architecture & Injection Routes)](#-how-it-works-architecture--injection-routes)
+4. [⬇️ Installation & Quick Start](#%EF%B8%8F-installation--quick-start)
+5. [📖 Step-by-Step Usage Guide](#-step-by-step-usage-guide)
+6. [🎞️ DLSS Frame Generation (`DLSS-G`) Hook & Translation](#%EF%B8%8F-dlss-frame-generation-dlss-g-hook--translation)
+7. [🔄 Switching Between HelixSR & Custom FSR (`my-fsr`)](#-switching-between-helixsr--custom-fsr-my-fsr)
+8. [🛠️ Building from Source](#%EF%B8%8F-building-from-source)
+9. [📂 Repository Structure](#-repository-structure)
+10. [🔧 Troubleshooting & FAQ](#-troubleshooting--faq)
+11. [🙏 Referenced Projects, Credits & Acknowledgments](#-referenced-projects-credits--acknowledgments)
+12. [⚖️ Legal Disclaimers, Licensing & Third-Party Notices](#%EF%B8%8F-legal-disclaimers-licensing--third-party-notices)
+13. [☕ Support & 💬 Contact](#-support--contact)
 
 ---
 
@@ -82,6 +83,43 @@
   - One-click **Clear Shader Cache** button purges corrupted DX12 pipeline caches (`shader.cache2`, `piplinelist.bin`, `*shader*.bin`, and Linux Proton `DXVK_state_cache` / `fozpipelinesv6`).
   - Built-in **`OptiScaler.ini` editor** and live **`helixsr.log` / `OptiScaler.log` diagnostic viewer** inside the slide-out Game Drawer.
   - Every modified or replaced file is tracked in `helixsr-install.json` and backed up in `HelixSR/backup/` or as `*.original.dll` for 100% clean restoration.
+
+---
+
+## 🎮 Handheld Mode & Full Controller Navigation
+
+HelixSR Manager v1.1.0 introduces a dedicated **Fullscreen Handheld Mode** engineered specifically for PC gaming handhelds such as the **Steam Deck**, **ASUS ROG Ally**, **Lenovo Legion Go**, **MSI Claw**, **AYANEO**, **GPD Win**, and **OneXPlayer**, as well as couch-gaming setups.
+
+### 🤖 Automatic Handheld Environment Detection
+HelixSR Manager continuously inspects system telemetry upon startup and will **automatically switch into Handheld Mode** without any manual configuration when either of the following conditions is detected:
+
+1. **Windows Xbox Mode (formerly Full Screen Experience)**:
+   - Detects active Windows Handheld Gaming Configuration registry entries (`EnterGamingPostureOnStartup`, `GamingPosture`, `XboxMode`, or `GamingHomeApp`).
+   - Detects the OEM Handheld Device Form factor (`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\OEM\DeviceForm = 46`).
+   - Detects running Xbox Handheld posture sessions (`XboxPcAppFT.exe` or `GameBarFT.exe` compact mode).
+   - Detects known handheld PC chassis and motherboard models via WMI query (`ROG Ally`, `Legion Go`, `Claw`, `AYANEO`, `GPD Win`, `OneXPlayer`, `AOKZOE`).
+2. **SteamOS & Bazzite (Linux / Steam Deck / Gamescope)**:
+   - Detects SteamOS and Bazzite distribution identifiers (`/etc/os-release`, `ID=steamos`, `ID=bazzite`, `VARIANT_ID=steamdeck`).
+   - Detects Steam Deck DMI product hardware names (`jupiter` / `galileo`).
+   - Detects active Steam Deck sessions (`STEAM_DECK=1`, `SteamGamepadUI=1`, or `XDG_CURRENT_DESKTOP=gamescope`).
+
+> [!TIP]
+> **Manual Handheld Toggle:** You can switch between standard desktop window mode and fullscreen handheld mode at any time by pressing **<kbd>F11</kbd>**, clicking the **🎮 Handheld** button in the top action bar, or pressing the **View / Back** button on your controller.
+
+### 🕹️ Full Gamepad Controller Navigation
+Both the Windows Native Edition (via zero-dependency native Windows `XInput`) and the Linux/SteamOS Edition (via the HTML5 Gamepad API) feature complete controller navigation out of the box:
+
+| Gamepad Button | Action | Context |
+| :---: | :--- | :--- |
+| **<kbd>A</kbd>** | **Select / Install** | In Library: opens the game drawer.<br>In Drawer: triggers Quick Install / Update. |
+| **<kbd>B</kbd>** | **Back / Close** | In Drawer: closes the drawer.<br>In Search: clears and unfocuses search input. |
+| **<kbd>X</kbd>** | **Focus Search** | Immediately jumps to and selects the title search bar. |
+| **<kbd>Y</kbd>** | **Toggle View Mode** | Switches between Poster Grid View and Detailed List View. |
+| **<kbd>LB</kbd> / <kbd>RB</kbd>** | **Cycle Tabs** | Cycles between Games Library, Engine Compiler, Custom FSR, Settings, and About. |
+| **<kbd>LT</kbd> / <kbd>RT</kbd>** | **Cycle Filters** | Cycles through quick filter pills (*All*, *Active*, *Not Installed*, *OptiScaler*, *Direct FSR*, *Capcom*). |
+| **<kbd>View</kbd> (Back)** | **Toggle Handheld** | Toggles between Fullscreen Handheld Mode and Standard Window Mode. |
+| **<kbd>Menu</kbd> (Start)** | **Rescan Library** | Rescans all installed Steam and custom game directories (equivalent to <kbd>F5</kbd>). |
+| **D-Pad / Left Stick** | **Navigate Grid / Cards** | Directionally moves focus across game cards with automatic viewport scrolling, 3px high-contrast gold highlight border, and ambient glow. |
 
 ---
 

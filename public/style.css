@@ -1274,3 +1274,114 @@ kbd {
   margin-bottom: 12px;
   opacity: 0.4;
 }
+
+/* ========================================================
+   Handheld-Optimized UI & Controller Navigation
+   ======================================================== */
+.handheld-toggle-btn.active {
+  background: var(--accent-emerald-glow);
+  border-color: var(--accent-emerald);
+  color: var(--accent-emerald);
+}
+
+.handheld-controller-bar {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 46px;
+  background: rgba(12, 16, 23, 0.96);
+  border-top: 1px solid var(--border-focus);
+  backdrop-filter: blur(12px);
+  z-index: 999;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 0 16px;
+}
+
+body.handheld-mode .handheld-controller-bar {
+  display: flex;
+}
+
+body.handheld-mode .app-layout {
+  padding-bottom: 46px;
+}
+
+body.handheld-mode .game-card {
+  min-height: 290px;
+}
+
+body.handheld-mode .btn,
+body.handheld-mode .filter-select {
+  min-height: 42px;
+  font-size: 0.95rem;
+}
+
+body.handheld-mode .nav-item {
+  min-height: 48px;
+  font-size: 1rem;
+}
+
+/* Gamepad Focus Ring */
+.gamepad-focused {
+  outline: 3px solid var(--accent-emerald) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 22px rgba(241, 196, 15, 0.65) !important;
+  transform: translateY(-4px) scale(1.02) !important;
+  z-index: 10 !important;
+}
+
+/* Controller Legend Badges */
+.controller-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.gamepad-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #06080d;
+}
+
+.gamepad-badge.btn-a {
+  background: #2ecc71;
+}
+
+.gamepad-badge.btn-b {
+  background: #e74c3c;
+  color: #fff;
+}
+
+.gamepad-badge.btn-x {
+  background: #3498db;
+  color: #fff;
+}
+
+.gamepad-badge.btn-y {
+  background: #f1c40f;
+}
+
+.gamepad-badge.btn-shoulder {
+  background: #95a5a6;
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+
+.gamepad-badge.btn-special {
+  background: #9b59b6;
+  color: #fff;
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+

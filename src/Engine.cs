@@ -14,7 +14,7 @@ namespace HelixSRSwapper
     public class Engine
     {
         /// <summary>HelixSR Manager release version (shown in the sidebar logo and window title).</summary>
-        public const string AppVersion = "1.0.0";
+        public const string AppVersion = "1.1.0";
         /// <summary>Bundled upstream HelixSR core version (helixsr_core/HelixSR-x.y.z).</summary>
         public const string CoreVersion = "1.8.1";
 
@@ -74,6 +74,257 @@ namespace HelixSRSwapper
             }
             catch { }
             return Directory.Exists(@"Z:\home") || Directory.Exists("/home");
+        }
+
+        /// <summary>
+        /// Detects if the device is running in Windows Xbox mode (previously Full Screen Experience),
+        /// or running on SteamOS / Bazzite / Gamescope, or handheld hardware (ROG Ally, Legion Go, Deck, etc.).
+        /// </summary>
+        public static HandheldEnvironmentInfo DetectHandheldEnvironment()
+        {
+            var info = new HandheldEnvironmentInfo();
+
+            // 1. Explicit command line flags (--handheld, -handheld) or environment overrides
+            try
+            {
+                string[] args = Environment.GetCommandLineArgs();
+                if (args != null)
+                {
+                    foreach (var a in args)
+                    {
+                        if (string.Equals(a, "--handheld", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(a, "-handheld", StringComparison.OrdinalIgnoreCase))
+                        {
+                            info.IsHandheldDetected = true;
+                            info.DetectionReason = "Command line parameter --handheld";
+                            info.DetectedDevice = "Handheld Override";
+                            return info;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            string envXbox = Environment.GetEnvironmentVariable("XBOX_MODE");
+            string envHandheld = Environment.GetEnvironmentVariable("HELIXSR_HANDHELD");
+            if (envXbox == "1" || envHandheld == "1")
+            {
+                info.IsHandheldDetected = true;
+                info.IsXboxMode = true;
+                info.DetectionReason = "Handheld environment variable active";
+                info.DetectedDevice = "Handheld Session";
+                return info;
+            }
+
+            // 2. SteamOS / Bazzite detection (Linux or Wine/Proton)
+            string envDeck = Environment.GetEnvironmentVariable("STEAM_DECK");
+            string envGamepadUi = Environment.GetEnvironmentVariable("SteamGamepadUI");
+            if (envDeck == "1" || envGamepadUi == "1")
+            {
+                info.IsHandheldDetected = true;
+                info.IsSteamOS = true;
+                info.DetectionReason = "Steam Deck environment variable active";
+                info.DetectedDevice = "Steam Deck";
+                return info;
+            }
+
+            string xdgDesk = (Environment.GetEnvironmentVariable("XDG_CURRENT_DESKTOP") ?? "").ToLowerInvariant();
+            string desktopSession = (Environment.GetEnvironmentVariable("DESKTOP_SESSION") ?? "").ToLowerInvariant();
+            if (xdgDesk.Contains("gamescope") || desktopSession.Contains("gamescope") ||
+                xdgDesk.Contains("steamos") || desktopSession.Contains("steamos"))
+            {
+                info.IsHandheldDetected = true;
+                info.IsSteamOS = true;
+                info.DetectionReason = "Gamescope / SteamOS session active";
+                info.DetectedDevice = "SteamOS Handheld";
+                return info;
+            }
+
+            // Check /etc/os-release paths (direct Linux or Wine Z: mapped drive)
+            string[] osReleaseCandidates = new string[] { "/etc/os-release", @"Z:\etc\os-release", @"C:\etc\os-release", "/usr/lib/os-release", @"Z:\usr\lib\os-release" };
+            foreach (var osPath in osReleaseCandidates)
+            {
+                try
+                {
+                    if (File.Exists(osPath))
+                    {
+                        string osContent = File.ReadAllText(osPath).ToLowerInvariant();
+                        if (osContent.Contains("id=steamos") || osContent.Contains("id=\"steamos\"") ||
+                            osContent.Contains("id_like=steamos") || osContent.Contains("variant_id=steamdeck"))
+                        {
+                            info.IsHandheldDetected = true;
+                            info.IsSteamOS = true;
+                            info.DetectionReason = "SteamOS distribution detected";
+                            info.DetectedDevice = "Steam Deck / SteamOS";
+                            return info;
+                        }
+                        if (osContent.Contains("id=bazzite") || osContent.Contains("id=\"bazzite\"") ||
+                            osContent.Contains("id_like=bazzite"))
+                        {
+                            info.IsHandheldDetected = true;
+                            info.IsBazzite = true;
+                            info.DetectionReason = "Bazzite distribution detected";
+                            info.DetectedDevice = "Bazzite Handheld";
+                            return info;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // Check DMI product name for Steam Deck (jupiter/galileo)
+            string[] dmiCandidates = new string[] { "/sys/devices/virtual/dmi/id/product_name", @"Z:\sys\devices\virtual\dmi\id\product_name" };
+            foreach (var dmiPath in dmiCandidates)
+            {
+                try
+                {
+                    if (File.Exists(dmiPath))
+                    {
+                        string dmi = File.ReadAllText(dmiPath).Trim().ToLowerInvariant();
+                        if (dmi.Contains("jupiter") || dmi.Contains("galileo") || dmi.Contains("steam deck"))
+                        {
+                            info.IsHandheldDetected = true;
+                            info.IsSteamOS = true;
+                            info.DetectionReason = string.Format("Steam Deck hardware detected ({0})", dmi);
+                            info.DetectedDevice = "Steam Deck";
+                            return info;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // 3. Windows Xbox Mode / Full Screen Experience Detection
+            // In Windows 11 Handheld / Xbox mode:
+            // Check HKCU\Software\Microsoft\Windows\CurrentVersion\GamingConfiguration
+            try
+            {
+                using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\GamingConfiguration"))
+                {
+                    if (k != null)
+                    {
+                        object app = k.GetValue("GamingHomeApp");
+                        object postureOnStartup = k.GetValue("EnterGamingPostureOnStartup");
+                        object posture = k.GetValue("GamingPosture");
+                        object xboxMode = k.GetValue("XboxMode");
+                        if ((postureOnStartup is int && (int)postureOnStartup != 0) ||
+                            (posture is int && (int)posture != 0) ||
+                            (xboxMode is int && (int)xboxMode != 0) ||
+                            (app != null && !string.IsNullOrEmpty(app.ToString())))
+                        {
+                            info.IsHandheldDetected = true;
+                            info.IsXboxMode = true;
+                            info.DetectionReason = "Windows Xbox Mode (Full Screen Experience) active";
+                            info.DetectedDevice = "Xbox Handheld Experience";
+                            return info;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // Check GameBar compact / fullscreen posture
+            try
+            {
+                using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\GameBar"))
+                {
+                    if (k != null)
+                    {
+                        object compact = k.GetValue("CompactMode");
+                        object fse = k.GetValue("FullScreenExperience");
+                        object xbox = k.GetValue("XboxMode");
+                        if ((compact is int && (int)compact == 1) ||
+                            (fse is int && (int)fse == 1) ||
+                            (xbox is int && (int)xbox == 1))
+                        {
+                            info.IsHandheldDetected = true;
+                            info.IsXboxMode = true;
+                            info.DetectionReason = "Windows Game Bar Handheld Compact Mode";
+                            info.DetectedDevice = "Xbox Handheld Experience";
+                            return info;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // Check Windows Handheld OEM DeviceForm (DeviceForm = 46 / 0x2E is Handheld PC)
+            try
+            {
+                using (var k = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\OEM"))
+                {
+                    if (k != null)
+                    {
+                        object df = k.GetValue("DeviceForm");
+                        if (df is int && (int)df == 46)
+                        {
+                            info.IsHandheldDetected = true;
+                            info.IsHandheldHardware = true;
+                            info.DetectionReason = "Windows Handheld Device Form factor detected";
+                            info.DetectedDevice = "Handheld PC";
+                            return info;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // Check running Xbox Fullscreen / GameBar posture processes
+            try
+            {
+                var procs = Process.GetProcesses();
+                foreach (var p in procs)
+                {
+                    try
+                    {
+                        string pName = p.ProcessName.ToLowerInvariant();
+                        if (pName == "xboxpcappft" || pName == "gamebarft")
+                        {
+                            info.IsHandheldDetected = true;
+                            info.IsXboxMode = true;
+                            info.DetectionReason = "Xbox Full Screen Experience process active (" + p.ProcessName + ")";
+                            info.DetectedDevice = "Xbox Handheld Mode";
+                            return info;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            // 4. Hardware WMI detection for Handheld PC models (ROG Ally, Legion Go, Claw, etc.)
+            try
+            {
+                using (var searcher = new System.Management.ManagementObjectSearcher("SELECT Model, Manufacturer FROM Win32_ComputerSystem"))
+                {
+                    foreach (var obj in searcher.Get())
+                    {
+                        string model = (obj["Model"] ?? "").ToString();
+                        string mfr = (obj["Manufacturer"] ?? "").ToString();
+                        string combined = (mfr + " " + model).ToLowerInvariant();
+
+                        string[] handheldKeywords = new string[] {
+                            "rog ally", "legion go", "claw a1m", "claw 8", "steam deck",
+                            "ayaneo", "gpd win", "onexplayer", "aokzoe", "oxp"
+                        };
+
+                        foreach (var kw in handheldKeywords)
+                        {
+                            if (combined.Contains(kw))
+                            {
+                                info.IsHandheldDetected = true;
+                                info.IsHandheldHardware = true;
+                                info.DetectionReason = string.Format("Handheld hardware detected: {0}", model);
+                                info.DetectedDevice = model;
+                                return info;
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return info;
         }
 
         /// <summary>

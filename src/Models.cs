@@ -98,4 +98,21 @@ namespace HelixSRSwapper
         public long RamMB { get; set; }
         public string Driver { get; set; }
     }
+
+    public class HandheldEnvironmentInfo
+    {
+        public bool IsHandheldDetected { get; set; }
+        public bool IsXboxMode { get; set; }
+        public bool IsSteamOS { get; set; }
+        public bool IsBazzite { get; set; }
+        public bool IsHandheldHardware { get; set; }
+        public string DetectionReason { get; set; }
+        public string DetectedDevice { get; set; }
+
+        public HandheldEnvironmentInfo()
+        {
+            DetectionReason = string.Empty;
+            DetectedDevice = string.Empty;
+        }
+    }
 }

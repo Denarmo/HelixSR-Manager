@@ -15,6 +15,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using FolderBrowserDialog = System.Windows.Forms.FolderBrowserDialog;
 using Application = System.Windows.Application;
 using Button = System.Windows.Controls.Button;
@@ -30,6 +31,107 @@ using TextBox = System.Windows.Controls.TextBox;
 
 namespace HelixSRSwapper
 {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct XINPUT_GAMEPAD
+    {
+        public ushort wButtons;
+        public byte bLeftTrigger;
+        public byte bRightTrigger;
+        public short sThumbLX;
+        public short sThumbLY;
+        public short sThumbRX;
+        public short sThumbRY;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct XINPUT_STATE
+    {
+        public uint dwPacketNumber;
+        public XINPUT_GAMEPAD Gamepad;
+    }
+
+    internal static class XInputButtons
+    {
+        public const ushort DPAD_UP = 0x0001;
+        public const ushort DPAD_DOWN = 0x0002;
+        public const ushort DPAD_LEFT = 0x0004;
+        public const ushort DPAD_RIGHT = 0x0008;
+        public const ushort START = 0x0010;
+        public const ushort BACK = 0x0020;
+        public const ushort LEFT_THUMB = 0x0040;
+        public const ushort RIGHT_THUMB = 0x0080;
+        public const ushort LEFT_SHOULDER = 0x0100;
+        public const ushort RIGHT_SHOULDER = 0x0200;
+        public const ushort A = 0x1000;
+        public const ushort B = 0x2000;
+        public const ushort X = 0x4000;
+        public const ushort Y = 0x8000;
+    }
+
+    internal static class XInputNative
+    {
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+        private static extern IntPtr LoadLibrary(string lpFileName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+        private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        public delegate int XInputGetStateDelegate(int dwUserIndex, ref XINPUT_STATE pState);
+
+        private static XInputGetStateDelegate _getState;
+        private static bool _initialized = false;
+        private static bool _available = false;
+
+        public static bool IsAvailable
+        {
+            get
+            {
+                EnsureInitialized();
+                return _available;
+            }
+        }
+
+        private static void EnsureInitialized()
+        {
+            if (_initialized) return;
+            _initialized = true;
+            string[] dlls = new string[] { "xinput1_4.dll", "xinput9_1_0.dll", "xinput1_3.dll" };
+            foreach (var dll in dlls)
+            {
+                try
+                {
+                    IntPtr hMod = LoadLibrary(dll);
+                    if (hMod != IntPtr.Zero)
+                    {
+                        IntPtr proc = GetProcAddress(hMod, "XInputGetState");
+                        if (proc != IntPtr.Zero)
+                        {
+                            _getState = (XInputGetStateDelegate)Marshal.GetDelegateForFunctionPointer(proc, typeof(XInputGetStateDelegate));
+                            _available = true;
+                            break;
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+
+        public static int GetState(int userIndex, ref XINPUT_STATE state)
+        {
+            EnsureInitialized();
+            if (_getState != null)
+            {
+                try
+                {
+                    return _getState(userIndex, ref state);
+                }
+                catch { }
+            }
+            return 1167; // ERROR_DEVICE_NOT_CONNECTED
+        }
+    }
+
     public class MainWindow : Window
     {
         // Theme State (DLSS5-Swapper Aurora Dark & Clean Light)
@@ -64,6 +166,23 @@ namespace HelixSRSwapper
         private bool _isGridView = true;
         private Process _compileProc = null;
         private volatile bool _isClosing = false;
+
+        // Handheld & Controller Navigation State
+        private bool _isHandheldMode = false;
+        private WindowStyle _prevWindowStyle = WindowStyle.SingleBorderWindow;
+        private WindowState _prevWindowState = WindowState.Normal;
+        private ResizeMode _prevResizeMode = ResizeMode.CanResize;
+        private Grid _rootGrid;
+        private Border _handheldLegendBar;
+        private Button _btnHandheldToggle;
+        private DispatcherTimer _gamepadTimer;
+        private int _focusedGameIndex = -1;
+        private int _gamepadNavHoldCount = 0;
+        private int _lastNavDirection = 0;
+        private ushort _prevGamepadButtons = 0;
+        private byte _prevLeftTrigger = 0;
+        private byte _prevRightTrigger = 0;
+        private List<GameInfo> _currentRenderedGames = new List<GameInfo>();
 
         // UI Controls
         private TextBlock _txtGameCountBadge;
@@ -475,6 +594,10 @@ namespace HelixSRSwapper
         protected override void OnClosed(EventArgs e)
         {
             _isClosing = true;
+            if (_gamepadTimer != null)
+            {
+                try { _gamepadTimer.Stop(); _gamepadTimer = null; } catch { }
+            }
             KillCompileProcess();
             base.OnClosed(e);
             try { Application.Current.Shutdown(); } catch { }
@@ -534,10 +657,31 @@ namespace HelixSRSwapper
             RefreshGames();
             UpdateCoreStatus();
             UpdateGpuInfo();
+
+            // Detect handheld mode (Windows Xbox Mode / Full Screen Experience or SteamOS / Bazzite)
+            try
+            {
+                var handheldInfo = Engine.DetectHandheldEnvironment();
+                if (handheldInfo != null && handheldInfo.IsHandheldDetected)
+                {
+                    ToggleHandheldMode(true);
+                    string devName = !string.IsNullOrEmpty(handheldInfo.DetectedDevice) ? handheldInfo.DetectedDevice : "Handheld";
+                    ShowToast(string.Format("🎮 Handheld Mode automatically enabled ({0}: {1})", devName, handheldInfo.DetectionReason));
+                }
+            }
+            catch { }
+
+            StartGamepadPolling();
         }
 
         private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            if (e.Key == Key.F11)
+            {
+                ToggleHandheldMode();
+                e.Handled = true;
+                return;
+            }
             if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control && (e.Key == Key.K || e.Key == Key.F))
             {
                 if (_txtSearch != null)
@@ -766,13 +910,13 @@ namespace HelixSRSwapper
             }
 
             // Shell Grid with floating sidebar & main content
-            var rootGrid = new Grid { Margin = new Thickness(14) };
-            rootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(248) }); // Floating Sidebar
-            rootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });  // Gap
-            rootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Main Content
+            _rootGrid = new Grid { Margin = new Thickness(14) };
+            _rootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(248) }); // Floating Sidebar
+            _rootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });  // Gap
+            _rootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Main Content
 
             // 1. Floating Sidebar
-            rootGrid.Children.Add(BuildSidebar());
+            _rootGrid.Children.Add(BuildSidebar());
 
             // 2. Main Container (Floating Rounded Card Shell)
             var mainBorder = new Border
@@ -793,8 +937,8 @@ namespace HelixSRSwapper
             mainContainer.Children.Add(BuildContentPanes());
 
             mainBorder.Child = mainContainer;
-            rootGrid.Children.Add(mainBorder);
-            outerShell.Children.Add(rootGrid);
+            _rootGrid.Children.Add(mainBorder);
+            outerShell.Children.Add(_rootGrid);
 
             // 3. Drag & Drop Glassmorphic Overlay
             _dropOverlay = new Border
@@ -838,6 +982,10 @@ namespace HelixSRSwapper
             };
             _toastBanner.Child = _txtToastMessage;
             outerShell.Children.Add(_toastBanner);
+
+            // 5. Handheld Controller Legend Bar
+            _handheldLegendBar = BuildHandheldLegendBar();
+            outerShell.Children.Add(_handheldLegendBar);
 
             Content = outerShell;
         }
@@ -1201,8 +1349,12 @@ namespace HelixSRSwapper
             };
 
             var btnTheme = CreateButton(_isLightTheme ? "🌙 Dark" : "☀️ Light", BgCardHover, TextMain, delegate { ToggleTheme(); });
-            btnTheme.Margin = new Thickness(0, 2, 0, 2);
+            btnTheme.Margin = new Thickness(0, 2, 6, 2);
             btnTheme.ToolTip = "Switch between HelixSR Manager Dark Gold and Clean Light theme";
+
+            _btnHandheldToggle = CreateButton("🎮 Handheld", BgCardHover, TextMain, delegate { ToggleHandheldMode(); });
+            _btnHandheldToggle.Margin = new Thickness(0, 2, 0, 2);
+            _btnHandheldToggle.ToolTip = "Toggle Fullscreen Handheld & Controller Navigation Mode (F11 / Controller View Button)";
 
             rightWrap.Children.Add(btnAddGame);
             rightWrap.Children.Add(btnRefresh);
@@ -1210,6 +1362,7 @@ namespace HelixSRSwapper
             rightWrap.Children.Add(btnRestoreAll);
             rightWrap.Children.Add(btnToggleView);
             rightWrap.Children.Add(btnTheme);
+            rightWrap.Children.Add(_btnHandheldToggle);
             dock.Children.Add(rightWrap);
 
             // Left Search & Dropdown Filters
@@ -2869,6 +3022,7 @@ namespace HelixSRSwapper
 
         private void RenderGames(List<GameInfo> list)
         {
+            _currentRenderedGames = list ?? new List<GameInfo>();
             _gridWrapPanel.Children.Clear();
             _listGamesView.ItemsSource = list;
             if (_emptyStatePanel != null)
@@ -2880,6 +3034,11 @@ namespace HelixSRSwapper
             {
                 var card = BuildGameCard(g);
                 _gridWrapPanel.Children.Add(card);
+            }
+
+            if (_isHandheldMode && _currentRenderedGames.Count > 0)
+            {
+                UpdateGamepadFocus(_focusedGameIndex >= 0 ? _focusedGameIndex : 0);
             }
         }
 
@@ -2901,6 +3060,7 @@ namespace HelixSRSwapper
 
             var card = new Border
             {
+                Tag = game,
                 Width = 204,
                 Height = 304,
                 CornerRadius = new CornerRadius(14),
@@ -3499,6 +3659,425 @@ namespace HelixSRSwapper
             try { proc.StandardInput.Close(); } catch { }
             proc.BeginOutputReadLine();
             proc.BeginErrorReadLine();
+        }
+        #endregion
+
+        #region Handheld & Gamepad Controller Support
+        public void ToggleHandheldMode(bool? forceEnable = null)
+        {
+            bool target = forceEnable.HasValue ? forceEnable.Value : !_isHandheldMode;
+            if (_isHandheldMode == target) return;
+            _isHandheldMode = target;
+
+            if (_isHandheldMode)
+            {
+                _prevWindowStyle = WindowStyle;
+                _prevWindowState = WindowState;
+                _prevResizeMode = ResizeMode;
+
+                WindowStyle = WindowStyle.None;
+                ResizeMode = ResizeMode.NoResize;
+                WindowState = WindowState.Normal;
+                WindowState = WindowState.Maximized;
+
+                if (_handheldLegendBar != null) _handheldLegendBar.Visibility = Visibility.Visible;
+                if (_rootGrid != null) _rootGrid.Margin = new Thickness(8, 8, 8, 48);
+
+                if (_btnHandheldToggle != null)
+                {
+                    _btnHandheldToggle.Content = "🎮 Handheld: ON";
+                    _btnHandheldToggle.Background = AccentEmeraldBg;
+                    _btnHandheldToggle.BorderBrush = AccentEmerald;
+                }
+
+                if (_focusedGameIndex < 0 && _currentRenderedGames != null && _currentRenderedGames.Count > 0)
+                {
+                    UpdateGamepadFocus(0);
+                }
+
+                ShowToast("🎮 Handheld Mode: ON (Fullscreen & Controller Navigation Active)");
+            }
+            else
+            {
+                WindowState = _prevWindowState != WindowState.Minimized ? _prevWindowState : WindowState.Normal;
+                WindowStyle = _prevWindowStyle != WindowStyle.None ? _prevWindowStyle : WindowStyle.SingleBorderWindow;
+                ResizeMode = _prevResizeMode != ResizeMode.NoResize ? _prevResizeMode : ResizeMode.CanResize;
+
+                if (_handheldLegendBar != null) _handheldLegendBar.Visibility = Visibility.Collapsed;
+                if (_rootGrid != null) _rootGrid.Margin = new Thickness(14);
+
+                if (_btnHandheldToggle != null)
+                {
+                    _btnHandheldToggle.Content = "🎮 Handheld";
+                    _btnHandheldToggle.Background = BgCardHover;
+                    _btnHandheldToggle.BorderBrush = BorderColor;
+                }
+
+                ShowToast("🎮 Handheld Mode: OFF (Standard Desktop Window)");
+            }
+        }
+
+        private Border BuildHandheldLegendBar()
+        {
+            var bar = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(235, 12, 16, 23)),
+                BorderBrush = BorderStrong,
+                BorderThickness = new Thickness(0, 1, 0, 0),
+                Height = 44,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Visibility = Visibility.Collapsed,
+                Padding = new Thickness(16, 0, 16, 0)
+            };
+
+            var stack = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            stack.Children.Add(CreateLegendItem("A", Color.FromRgb(46, 204, 113), "Select / Install"));
+            stack.Children.Add(CreateLegendItem("B", Color.FromRgb(231, 76, 60), "Back / Close"));
+            stack.Children.Add(CreateLegendItem("X", Color.FromRgb(52, 152, 219), "Search"));
+            stack.Children.Add(CreateLegendItem("Y", Color.FromRgb(241, 196, 15), "Toggle View"));
+            stack.Children.Add(CreateLegendItem("LB/RB", Color.FromRgb(149, 165, 166), "Tabs"));
+            stack.Children.Add(CreateLegendItem("LT/RT", Color.FromRgb(149, 165, 166), "Filters"));
+            stack.Children.Add(CreateLegendItem("View", Color.FromRgb(155, 89, 182), "Exit Handheld (F11)"));
+
+            bar.Child = stack;
+            return bar;
+        }
+
+        private FrameworkElement CreateLegendItem(string buttonText, Color badgeColor, string actionText)
+        {
+            var panel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(10, 0, 10, 0)
+            };
+
+            var badge = new Border
+            {
+                Background = new SolidColorBrush(badgeColor),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(7, 2, 7, 2),
+                Margin = new Thickness(0, 0, 6, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var txtBadge = new TextBlock
+            {
+                Text = buttonText,
+                FontSize = 11,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.Black,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            badge.Child = txtBadge;
+
+            var txtLabel = new TextBlock
+            {
+                Text = actionText,
+                FontSize = 12,
+                Foreground = TextMuted,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            panel.Children.Add(badge);
+            panel.Children.Add(txtLabel);
+            return panel;
+        }
+
+        private void StartGamepadPolling()
+        {
+            if (_gamepadTimer != null) return;
+            _gamepadTimer = new DispatcherTimer(DispatcherPriority.Input);
+            _gamepadTimer.Interval = TimeSpan.FromMilliseconds(32);
+            _gamepadTimer.Tick += GamepadTimer_Tick;
+            _gamepadTimer.Start();
+        }
+
+        private void GamepadTimer_Tick(object sender, EventArgs e)
+        {
+            if (!XInputNative.IsAvailable) return;
+            XINPUT_STATE state = new XINPUT_STATE();
+            if (XInputNative.GetState(0, ref state) != 0)
+            {
+                _prevGamepadButtons = 0;
+                _prevLeftTrigger = 0;
+                _prevRightTrigger = 0;
+                return;
+            }
+
+            ushort buttons = state.Gamepad.wButtons;
+            ushort pressed = (ushort)(buttons & ~_prevGamepadButtons);
+            byte lt = state.Gamepad.bLeftTrigger;
+            byte rt = state.Gamepad.bRightTrigger;
+            short stickX = state.Gamepad.sThumbLX;
+            short stickY = state.Gamepad.sThumbLY;
+
+            const short deadzone = 16000;
+            const byte trigThreshold = 120;
+
+            // View / Back button toggles Handheld Mode
+            if ((pressed & XInputButtons.BACK) != 0)
+            {
+                ToggleHandheldMode();
+            }
+            // Start / Menu button refreshes games library
+            else if ((pressed & XInputButtons.START) != 0)
+            {
+                RefreshGames();
+                ShowToast("↻ Library rescanned");
+            }
+            // LB / RB: Cycle main navigation tabs
+            else if ((pressed & XInputButtons.LEFT_SHOULDER) != 0)
+            {
+                CycleTabs(-1);
+            }
+            else if ((pressed & XInputButtons.RIGHT_SHOULDER) != 0)
+            {
+                CycleTabs(1);
+            }
+            // Y: Toggle Grid / List view
+            else if ((pressed & XInputButtons.Y) != 0)
+            {
+                _isGridView = !_isGridView;
+                _gamesScrollViewer.Visibility = _isGridView ? Visibility.Visible : Visibility.Collapsed;
+                _listGamesView.Visibility = _isGridView ? Visibility.Collapsed : Visibility.Visible;
+                if (_isGridView) UpdateGamepadFocus(_focusedGameIndex);
+                ShowToast(_isGridView ? "🔲 Grid View" : "☰ List View");
+            }
+            // X: Focus Search Input
+            else if ((pressed & XInputButtons.X) != 0)
+            {
+                if (_currentTab != "games") SwitchTab("games");
+                if (_txtSearch != null)
+                {
+                    _txtSearch.Focus();
+                    _txtSearch.SelectAll();
+                }
+            }
+
+            // LT / RT: Cycle Quick Filters
+            if (lt > trigThreshold && _prevLeftTrigger <= trigThreshold)
+            {
+                CycleFilters(-1);
+            }
+            else if (rt > trigThreshold && _prevRightTrigger <= trigThreshold)
+            {
+                CycleFilters(1);
+            }
+
+            // A: Select / Install / Open Drawer
+            if ((pressed & XInputButtons.A) != 0)
+            {
+                if (_drawerPanel != null && _drawerPanel.Visibility == Visibility.Visible)
+                {
+                    OnInstallClicked();
+                }
+                else if (_currentTab == "games" && _focusedGameIndex >= 0 && _focusedGameIndex < _currentRenderedGames.Count)
+                {
+                    OpenDrawer(_currentRenderedGames[_focusedGameIndex]);
+                }
+            }
+            // B: Back / Close Drawer / Clear Search
+            else if ((pressed & XInputButtons.B) != 0)
+            {
+                if (_drawerPanel != null && _drawerPanel.Visibility == Visibility.Visible)
+                {
+                    CloseDrawer();
+                }
+                else if (_txtSearch != null && !string.IsNullOrEmpty(_txtSearch.Text))
+                {
+                    _txtSearch.Text = "";
+                    Focus();
+                }
+            }
+
+            // Directional Navigation (D-pad & Left Stick)
+            int dir = 0;
+            if ((buttons & XInputButtons.DPAD_UP) != 0 || stickY > deadzone) dir = 1;
+            else if ((buttons & XInputButtons.DPAD_DOWN) != 0 || stickY < -deadzone) dir = 2;
+            else if ((buttons & XInputButtons.DPAD_LEFT) != 0 || stickX < -deadzone) dir = 3;
+            else if ((buttons & XInputButtons.DPAD_RIGHT) != 0 || stickX > deadzone) dir = 4;
+
+            if (dir != 0)
+            {
+                bool shouldAct = false;
+                if (dir != _lastNavDirection)
+                {
+                    _lastNavDirection = dir;
+                    _gamepadNavHoldCount = 0;
+                    shouldAct = true;
+                }
+                else
+                {
+                    _gamepadNavHoldCount++;
+                    // Initial repeat delay (~350ms / 11 ticks), then repeat every ~120ms (4 ticks)
+                    if (_gamepadNavHoldCount > 11 && (_gamepadNavHoldCount % 4 == 0))
+                    {
+                        shouldAct = true;
+                    }
+                }
+
+                if (shouldAct)
+                {
+                    HandleDirectionalNav(dir);
+                }
+            }
+            else
+            {
+                _lastNavDirection = 0;
+                _gamepadNavHoldCount = 0;
+            }
+
+            _prevGamepadButtons = buttons;
+            _prevLeftTrigger = lt;
+            _prevRightTrigger = rt;
+        }
+
+        private void HandleDirectionalNav(int dir)
+        {
+            if (_drawerPanel != null && _drawerPanel.Visibility == Visibility.Visible)
+            {
+                if (dir == 3) // Left
+                {
+                    if (_currentDrawerTab == "logs") SwitchDrawerTab("ini");
+                    else if (_currentDrawerTab == "ini") SwitchDrawerTab("guide");
+                }
+                else if (dir == 4) // Right
+                {
+                    if (_currentDrawerTab == "guide") SwitchDrawerTab("ini");
+                    else if (_currentDrawerTab == "ini") SwitchDrawerTab("logs");
+                }
+                return;
+            }
+
+            if (_currentTab != "games" || _currentRenderedGames == null || _currentRenderedGames.Count == 0) return;
+
+            int cols = 1;
+            if (_isGridView && _gridWrapPanel != null && _gridWrapPanel.ActualWidth > 0)
+            {
+                cols = Math.Max(1, (int)(_gridWrapPanel.ActualWidth / 222));
+            }
+
+            int cur = _focusedGameIndex;
+            if (cur < 0) cur = 0;
+
+            int next = cur;
+            if (dir == 1) // Up
+            {
+                next = _isGridView ? cur - cols : cur - 1;
+            }
+            else if (dir == 2) // Down
+            {
+                next = _isGridView ? cur + cols : cur + 1;
+            }
+            else if (dir == 3) // Left
+            {
+                next = cur - 1;
+            }
+            else if (dir == 4) // Right
+            {
+                next = cur + 1;
+            }
+
+            if (next < 0) next = 0;
+            if (next >= _currentRenderedGames.Count) next = _currentRenderedGames.Count - 1;
+
+            UpdateGamepadFocus(next);
+        }
+
+        private void UpdateGamepadFocus(int newIndex)
+        {
+            if (_currentRenderedGames == null || _currentRenderedGames.Count == 0)
+            {
+                _focusedGameIndex = -1;
+                return;
+            }
+
+            if (newIndex < 0) newIndex = 0;
+            if (newIndex >= _currentRenderedGames.Count) newIndex = _currentRenderedGames.Count - 1;
+            _focusedGameIndex = newIndex;
+
+            if (_isGridView)
+            {
+                for (int i = 0; i < _gridWrapPanel.Children.Count; i++)
+                {
+                    var card = _gridWrapPanel.Children[i] as Border;
+                    if (card == null) continue;
+                    var g = card.Tag as GameInfo;
+                    if (i == _focusedGameIndex)
+                    {
+                        card.BorderBrush = AccentEmeraldStrong;
+                        card.BorderThickness = new Thickness(3.5);
+                        var glow = new DropShadowEffect
+                        {
+                            Color = Color.FromRgb(241, 196, 15),
+                            BlurRadius = 24,
+                            ShadowDepth = 0,
+                            Opacity = 0.85
+                        };
+                        card.Effect = glow;
+                        card.BringIntoView();
+                    }
+                    else
+                    {
+                        card.BorderBrush = (g != null && g.Installed) ? AccentEmerald : BorderColor;
+                        card.BorderThickness = new Thickness((g != null && g.Installed) ? 2 : 1);
+                        card.Effect = new DropShadowEffect
+                        {
+                            Color = Colors.Black,
+                            BlurRadius = 16,
+                            ShadowDepth = 5,
+                            Opacity = _isLightTheme ? 0.12 : 0.48
+                        };
+                    }
+                }
+            }
+            else
+            {
+                if (_listGamesView != null)
+                {
+                    _listGamesView.SelectedIndex = _focusedGameIndex;
+                    if (_listGamesView.SelectedItem != null)
+                    {
+                        _listGamesView.ScrollIntoView(_listGamesView.SelectedItem);
+                    }
+                }
+            }
+        }
+
+        private static readonly string[] NavTabs = new string[] { "games", "core", "myfsr", "settings", "about" };
+
+        private void CycleTabs(int delta)
+        {
+            int idx = Array.IndexOf(NavTabs, _currentTab);
+            if (idx < 0) idx = 0;
+            int next = idx + delta;
+            if (next < 0) next = NavTabs.Length - 1;
+            if (next >= NavTabs.Length) next = 0;
+            SwitchTab(NavTabs[next]);
+        }
+
+        private static readonly string[] QuickFilterKeys = new string[] { "all", "installed", "uninstalled", "optiscaler", "direct", "reengine" };
+
+        private void CycleFilters(int delta)
+        {
+            int idx = Array.IndexOf(QuickFilterKeys, _quickFilter);
+            if (idx < 0) idx = 0;
+            int next = idx + delta;
+            if (next < 0) next = QuickFilterKeys.Length - 1;
+            if (next >= QuickFilterKeys.Length) next = 0;
+            string target = QuickFilterKeys[next];
+
+            _quickFilter = target;
+            UpdateFilterPillVisuals();
+            FilterGames();
+            ShowToast("Filter: " + target);
         }
         #endregion
     }

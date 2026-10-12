@@ -1333,6 +1333,19 @@ body.handheld-mode .nav-item {
   z-index: 10 !important;
 }
 
+tr.gamepad-focused {
+  background: rgba(46, 204, 113, 0.15) !important;
+  outline: 2px solid var(--accent-emerald) !important;
+  outline-offset: -2px;
+  transform: none !important;
+  box-shadow: inset 0 0 12px rgba(46, 204, 113, 0.25) !important;
+}
+
+tr.selected-row {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-left: 3px solid var(--accent-emerald) !important;
+}
+
 /* Controller Legend Badges */
 .controller-legend-item {
   display: flex;

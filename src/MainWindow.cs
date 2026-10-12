@@ -31,107 +31,6 @@ using TextBox = System.Windows.Controls.TextBox;
 
 namespace HelixSRSwapper
 {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct XINPUT_GAMEPAD
-    {
-        public ushort wButtons;
-        public byte bLeftTrigger;
-        public byte bRightTrigger;
-        public short sThumbLX;
-        public short sThumbLY;
-        public short sThumbRX;
-        public short sThumbRY;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct XINPUT_STATE
-    {
-        public uint dwPacketNumber;
-        public XINPUT_GAMEPAD Gamepad;
-    }
-
-    internal static class XInputButtons
-    {
-        public const ushort DPAD_UP = 0x0001;
-        public const ushort DPAD_DOWN = 0x0002;
-        public const ushort DPAD_LEFT = 0x0004;
-        public const ushort DPAD_RIGHT = 0x0008;
-        public const ushort START = 0x0010;
-        public const ushort BACK = 0x0020;
-        public const ushort LEFT_THUMB = 0x0040;
-        public const ushort RIGHT_THUMB = 0x0080;
-        public const ushort LEFT_SHOULDER = 0x0100;
-        public const ushort RIGHT_SHOULDER = 0x0200;
-        public const ushort A = 0x1000;
-        public const ushort B = 0x2000;
-        public const ushort X = 0x4000;
-        public const ushort Y = 0x8000;
-    }
-
-    internal static class XInputNative
-    {
-        [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
-        private static extern IntPtr LoadLibrary(string lpFileName);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
-        private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
-
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        public delegate int XInputGetStateDelegate(int dwUserIndex, ref XINPUT_STATE pState);
-
-        private static XInputGetStateDelegate _getState;
-        private static bool _initialized = false;
-        private static bool _available = false;
-
-        public static bool IsAvailable
-        {
-            get
-            {
-                EnsureInitialized();
-                return _available;
-            }
-        }
-
-        private static void EnsureInitialized()
-        {
-            if (_initialized) return;
-            _initialized = true;
-            string[] dlls = new string[] { "xinput1_4.dll", "xinput9_1_0.dll", "xinput1_3.dll" };
-            foreach (var dll in dlls)
-            {
-                try
-                {
-                    IntPtr hMod = LoadLibrary(dll);
-                    if (hMod != IntPtr.Zero)
-                    {
-                        IntPtr proc = GetProcAddress(hMod, "XInputGetState");
-                        if (proc != IntPtr.Zero)
-                        {
-                            _getState = (XInputGetStateDelegate)Marshal.GetDelegateForFunctionPointer(proc, typeof(XInputGetStateDelegate));
-                            _available = true;
-                            break;
-                        }
-                    }
-                }
-                catch { }
-            }
-        }
-
-        public static int GetState(int userIndex, ref XINPUT_STATE state)
-        {
-            EnsureInitialized();
-            if (_getState != null)
-            {
-                try
-                {
-                    return _getState(userIndex, ref state);
-                }
-                catch { }
-            }
-            return 1167; // ERROR_DEVICE_NOT_CONNECTED
-        }
-    }
-
     public class MainWindow : Window
     {
         // Theme State (DLSS5-Swapper Aurora Dark & Clean Light)
@@ -169,11 +68,13 @@ namespace HelixSRSwapper
 
         // Handheld & Controller Navigation State
         private bool _isHandheldMode = false;
+        private bool _userDisabledHandheldMode = false;
         private WindowStyle _prevWindowStyle = WindowStyle.SingleBorderWindow;
         private WindowState _prevWindowState = WindowState.Normal;
         private ResizeMode _prevResizeMode = ResizeMode.CanResize;
         private Grid _rootGrid;
         private Border _handheldLegendBar;
+        private StackPanel _handheldLegendStack;
         private Button _btnHandheldToggle;
         private DispatcherTimer _gamepadTimer;
         private int _focusedGameIndex = -1;
@@ -229,6 +130,7 @@ namespace HelixSRSwapper
         private bool _updatingDrawerControls = false;
         private Button _btnDrawerInstall;
         private Button _btnDrawerUninstall;
+        private Button _btnDrawerLaunch;
         private TextBlock _txtDrawerExe;
         private TextBlock _txtDrawerFolder;
         private TextBlock _txtDrawerInputs;
@@ -253,7 +155,6 @@ namespace HelixSRSwapper
         private TextBlock _txtKernelsSize;
         private TextBlock _txtToolchainStatus;
         private ComboBox _cmbDlssSource;
-        private System.Windows.Controls.CheckBox _chkWave64;
         private TextBox _txtCompileConsole;
         private Button _btnStartBuild;
 
@@ -1287,6 +1188,7 @@ namespace HelixSRSwapper
             UpdateNavButtonVisual(_navBtnAbout, "about", tabKey);
 
             if (tabKey == "core") UpdateCoreStatus();
+            UpdateHandheldLegend();
         }
 
         private void UpdateNavButtonVisual(Button btn, string key, string activeKey)
@@ -1696,9 +1598,32 @@ namespace HelixSRSwapper
             _listGamesView.View = gv;
             _listGamesView.SelectionChanged += delegate
             {
-                if (_listGamesView.SelectedItem is GameInfo)
+                var g = _listGamesView.SelectedItem as GameInfo;
+                if (g != null)
                 {
-                    OpenDrawer((GameInfo)_listGamesView.SelectedItem);
+                    _selectedGame = g;
+                    int idx = _currentRenderedGames.IndexOf(g);
+                    if (idx >= 0) _focusedGameIndex = idx;
+                }
+            };
+            _listGamesView.MouseDoubleClick += delegate
+            {
+                var g = _listGamesView.SelectedItem as GameInfo;
+                if (g != null)
+                {
+                    OpenDrawer(g);
+                }
+            };
+            _listGamesView.KeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.Key == Key.Enter || e.Key == Key.Space)
+                {
+                    var g = _listGamesView.SelectedItem as GameInfo;
+                    if (g != null)
+                    {
+                        OpenDrawer(g);
+                        e.Handled = true;
+                    }
                 }
             };
             Grid.SetRow(_listGamesView, 2);
@@ -2010,12 +1935,12 @@ namespace HelixSRSwapper
             _btnDrawerInstall.Margin = new Thickness(0, 0, 5, 0);
             _btnDrawerUninstall = CreateButton("↩ Restore", AccentRed, Brushes.White, delegate { OnUninstallClicked(); });
             _btnDrawerUninstall.Margin = new Thickness(3, 0, 3, 0);
-            var btnLaunch = CreateButton("▶ Launch Game", BgCardHover, TextMain, delegate { OnLaunchClicked(); });
-            btnLaunch.Margin = new Thickness(5, 0, 0, 0);
+            _btnDrawerLaunch = CreateButton("▶ Launch Game", BgCardHover, TextMain, delegate { OnLaunchClicked(); });
+            _btnDrawerLaunch.Margin = new Thickness(5, 0, 0, 0);
 
             actionsBar.Children.Add(_btnDrawerInstall);
             actionsBar.Children.Add(_btnDrawerUninstall);
-            actionsBar.Children.Add(btnLaunch);
+            actionsBar.Children.Add(_btnDrawerLaunch);
             contentStack.Children.Add(actionsBar);
 
             // Folder Shortcuts & Maintenance
@@ -2452,7 +2377,10 @@ namespace HelixSRSwapper
             _txtDrawerStatus.Foreground = game.Installed ? AccentEmerald : TextDim;
 
             _btnDrawerInstall.Content = game.Installed ? "⚡ Update / Reinstall" : "⚡ Install HelixSR";
+            if (_isHandheldMode) _btnDrawerInstall.Content += " [A]";
             _btnDrawerUninstall.Visibility = game.Installed ? Visibility.Visible : Visibility.Collapsed;
+            if (_btnDrawerUninstall != null) _btnDrawerUninstall.Content = _isHandheldMode ? "↩ Restore [Y]" : "↩ Restore";
+            if (_btnDrawerLaunch != null) _btnDrawerLaunch.Content = _isHandheldMode ? "▶ Launch Game [X]" : "▶ Launch Game";
 
             _txtDrawerExe.Text = game.ExeName ?? "N/A";
             _txtDrawerFolder.Text = game.ExeFolder ?? game.Folder;
@@ -2471,6 +2399,7 @@ namespace HelixSRSwapper
             RefreshLogs();
 
             _drawerPanel.Visibility = Visibility.Visible;
+            UpdateHandheldLegend();
 
             if (wasClosed)
             {
@@ -2490,6 +2419,7 @@ namespace HelixSRSwapper
         {
             _drawerPanel.Visibility = Visibility.Collapsed;
             _selectedGame = null;
+            UpdateHandheldLegend();
         }
 
         private void RefreshLogs()
@@ -2735,20 +2665,9 @@ namespace HelixSRSwapper
                 Margin = new Thickness(0, 0, 0, 14)
             });
 
-            _cmbDlssSource = new ComboBox { Height = 36, Margin = new Thickness(0, 0, 0, 12) };
+            _cmbDlssSource = new ComboBox { Height = 36, Margin = new Thickness(0, 0, 0, 16) };
             _cmbDlssSource.Items.Add("Download automatically from NVIDIA GitHub");
             _cmbDlssSource.SelectedIndex = 0;
-
-            // HelixSR 1.8.0+ always builds both the 32- and 64-lane shaders; the DLL picks per GPU at run time
-            _chkWave64 = new System.Windows.Controls.CheckBox
-            {
-                Content = "Wave32 + Wave64 shaders (RDNA 1–4) — always built since Core 1.8.0, picked per GPU at run time",
-                Foreground = TextMain,
-                FontSize = 12,
-                IsChecked = true,
-                IsEnabled = false,
-                Margin = new Thickness(0, 0, 0, 16)
-            };
 
             _btnStartBuild = CreateButton("⚡ Compile HelixSR Network & Auto-Sync", AccentEmeraldStrong, TextOnAccent, delegate { StartNetworkCompilation(); });
             _btnStartBuild.Height = 40;
@@ -2772,7 +2691,6 @@ namespace HelixSRSwapper
             };
 
             bStack.Children.Add(_cmbDlssSource);
-            bStack.Children.Add(_chkWave64);
             bStack.Children.Add(_btnStartBuild);
             bStack.Children.Add(_txtCompileConsole);
             cardBuilder.Child = bStack;
@@ -3671,6 +3589,7 @@ namespace HelixSRSwapper
 
             if (_isHandheldMode)
             {
+                _userDisabledHandheldMode = false;
                 _prevWindowStyle = WindowStyle;
                 _prevWindowState = WindowState;
                 _prevResizeMode = ResizeMode;
@@ -3690,6 +3609,13 @@ namespace HelixSRSwapper
                     _btnHandheldToggle.BorderBrush = AccentEmerald;
                 }
 
+                if (_btnDrawerInstall != null) _btnDrawerInstall.Content = (_selectedGame != null && _selectedGame.Installed) ? "⚡ Update / Reinstall [A]" : "⚡ Install HelixSR [A]";
+                if (_btnDrawerLaunch != null) _btnDrawerLaunch.Content = "▶ Launch Game [X]";
+                if (_btnDrawerUninstall != null) _btnDrawerUninstall.Content = "↩ Restore [Y]";
+                if (_btnStartBuild != null) _btnStartBuild.Content = "⚡ Compile HelixSR Network [A]";
+
+                UpdateHandheldLegend();
+
                 if (_focusedGameIndex < 0 && _currentRenderedGames != null && _currentRenderedGames.Count > 0)
                 {
                     UpdateGamepadFocus(0);
@@ -3699,6 +3625,7 @@ namespace HelixSRSwapper
             }
             else
             {
+                _userDisabledHandheldMode = true;
                 WindowState = _prevWindowState != WindowState.Minimized ? _prevWindowState : WindowState.Normal;
                 WindowStyle = _prevWindowStyle != WindowStyle.None ? _prevWindowStyle : WindowStyle.SingleBorderWindow;
                 ResizeMode = _prevResizeMode != ResizeMode.NoResize ? _prevResizeMode : ResizeMode.CanResize;
@@ -3712,6 +3639,11 @@ namespace HelixSRSwapper
                     _btnHandheldToggle.Background = BgCardHover;
                     _btnHandheldToggle.BorderBrush = BorderColor;
                 }
+
+                if (_btnDrawerInstall != null) _btnDrawerInstall.Content = (_selectedGame != null && _selectedGame.Installed) ? "⚡ Update / Reinstall" : "⚡ Install HelixSR";
+                if (_btnDrawerLaunch != null) _btnDrawerLaunch.Content = "▶ Launch Game";
+                if (_btnDrawerUninstall != null) _btnDrawerUninstall.Content = "↩ Restore";
+                if (_btnStartBuild != null) _btnStartBuild.Content = "⚡ Compile HelixSR Network & Auto-Sync";
 
                 ShowToast("🎮 Handheld Mode: OFF (Standard Desktop Window)");
             }
@@ -3731,23 +3663,49 @@ namespace HelixSRSwapper
                 Padding = new Thickness(16, 0, 16, 0)
             };
 
-            var stack = new StackPanel
+            _handheldLegendStack = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
 
-            stack.Children.Add(CreateLegendItem("A", Color.FromRgb(46, 204, 113), "Select / Install"));
-            stack.Children.Add(CreateLegendItem("B", Color.FromRgb(231, 76, 60), "Back / Close"));
-            stack.Children.Add(CreateLegendItem("X", Color.FromRgb(52, 152, 219), "Search"));
-            stack.Children.Add(CreateLegendItem("Y", Color.FromRgb(241, 196, 15), "Toggle View"));
-            stack.Children.Add(CreateLegendItem("LB/RB", Color.FromRgb(149, 165, 166), "Tabs"));
-            stack.Children.Add(CreateLegendItem("LT/RT", Color.FromRgb(149, 165, 166), "Filters"));
-            stack.Children.Add(CreateLegendItem("View", Color.FromRgb(155, 89, 182), "Exit Handheld (F11)"));
-
-            bar.Child = stack;
+            bar.Child = _handheldLegendStack;
+            UpdateHandheldLegend();
             return bar;
+        }
+
+        private void UpdateHandheldLegend()
+        {
+            if (_handheldLegendStack == null) return;
+            _handheldLegendStack.Children.Clear();
+
+            bool isDrawerOpen = _drawerPanel != null && _drawerPanel.Visibility == Visibility.Visible;
+            if (isDrawerOpen)
+            {
+                _handheldLegendStack.Children.Add(CreateLegendItem("A", Color.FromRgb(46, 204, 113), "Install"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("X", Color.FromRgb(52, 152, 219), "Launch Game"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("Y", Color.FromRgb(241, 196, 15), "Restore"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("B", Color.FromRgb(231, 76, 60), "Close"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("LB/RB", Color.FromRgb(149, 165, 166), "Tabs (Guide/INI/Logs)"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("View", Color.FromRgb(155, 89, 182), "Exit Handheld (F11)"));
+            }
+            else if (_currentTab == "core")
+            {
+                _handheldLegendStack.Children.Add(CreateLegendItem("A", Color.FromRgb(46, 204, 113), "Compile Network"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("LB/RB", Color.FromRgb(149, 165, 166), "Tabs"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("B", Color.FromRgb(231, 76, 60), "Library"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("View", Color.FromRgb(155, 89, 182), "Exit Handheld (F11)"));
+            }
+            else
+            {
+                _handheldLegendStack.Children.Add(CreateLegendItem("A", Color.FromRgb(46, 204, 113), "Manage"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("X", Color.FromRgb(52, 152, 219), "Launch Game"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("Y", Color.FromRgb(241, 196, 15), "Toggle View"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("LB/RB", Color.FromRgb(149, 165, 166), "Tabs"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("LT/RT", Color.FromRgb(149, 165, 166), "Filters"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("View", Color.FromRgb(155, 89, 182), "Exit Handheld (F11)"));
+            }
         }
 
         private FrameworkElement CreateLegendItem(string buttonText, Color badgeColor, string actionText)
@@ -3802,13 +3760,30 @@ namespace HelixSRSwapper
         private void GamepadTimer_Tick(object sender, EventArgs e)
         {
             if (!XInputNative.IsAvailable) return;
+            int activeUser = -1;
             XINPUT_STATE state = new XINPUT_STATE();
-            if (XInputNative.GetState(0, ref state) != 0)
+            for (int i = 0; i < 4; i++)
+            {
+                if (XInputNative.GetState(i, ref state) == 0)
+                {
+                    activeUser = i;
+                    break;
+                }
+            }
+
+            if (activeUser == -1)
             {
                 _prevGamepadButtons = 0;
                 _prevLeftTrigger = 0;
                 _prevRightTrigger = 0;
                 return;
+            }
+
+            // Auto-switch to Handheld Mode if controller detected and not user-disabled
+            if (!_isHandheldMode && !_userDisabledHandheldMode)
+            {
+                ToggleHandheldMode(true);
+                ShowToast("🎮 Handheld Mode: Controller detected");
             }
 
             ushort buttons = state.Gamepad.wButtons;
@@ -3820,6 +3795,7 @@ namespace HelixSRSwapper
 
             const short deadzone = 16000;
             const byte trigThreshold = 120;
+            bool isDrawerOpen = _drawerPanel != null && _drawerPanel.Visibility == Visibility.Visible;
 
             // View / Back button toggles Handheld Mode
             if ((pressed & XInputButtons.BACK) != 0)
@@ -3832,68 +3808,129 @@ namespace HelixSRSwapper
                 RefreshGames();
                 ShowToast("↻ Library rescanned");
             }
-            // LB / RB: Cycle main navigation tabs
+            // LB / RB: Cycle tabs
             else if ((pressed & XInputButtons.LEFT_SHOULDER) != 0)
             {
-                CycleTabs(-1);
+                if (isDrawerOpen)
+                {
+                    if (_currentDrawerTab == "logs") SwitchDrawerTab("ini");
+                    else if (_currentDrawerTab == "ini") SwitchDrawerTab("guide");
+                }
+                else
+                {
+                    CycleTabs(-1);
+                }
             }
             else if ((pressed & XInputButtons.RIGHT_SHOULDER) != 0)
             {
-                CycleTabs(1);
-            }
-            // Y: Toggle Grid / List view
-            else if ((pressed & XInputButtons.Y) != 0)
-            {
-                _isGridView = !_isGridView;
-                _gamesScrollViewer.Visibility = _isGridView ? Visibility.Visible : Visibility.Collapsed;
-                _listGamesView.Visibility = _isGridView ? Visibility.Collapsed : Visibility.Visible;
-                if (_isGridView) UpdateGamepadFocus(_focusedGameIndex);
-                ShowToast(_isGridView ? "🔲 Grid View" : "☰ List View");
-            }
-            // X: Focus Search Input
-            else if ((pressed & XInputButtons.X) != 0)
-            {
-                if (_currentTab != "games") SwitchTab("games");
-                if (_txtSearch != null)
+                if (isDrawerOpen)
                 {
-                    _txtSearch.Focus();
-                    _txtSearch.SelectAll();
+                    if (_currentDrawerTab == "guide") SwitchDrawerTab("ini");
+                    else if (_currentDrawerTab == "ini") SwitchDrawerTab("logs");
+                }
+                else
+                {
+                    CycleTabs(1);
                 }
             }
-
-            // LT / RT: Cycle Quick Filters
-            if (lt > trigThreshold && _prevLeftTrigger <= trigThreshold)
+            // LT / RT: Cycle Quick Filters (when drawer closed)
+            else if (lt > trigThreshold && _prevLeftTrigger <= trigThreshold && !isDrawerOpen)
             {
                 CycleFilters(-1);
             }
-            else if (rt > trigThreshold && _prevRightTrigger <= trigThreshold)
+            else if (rt > trigThreshold && _prevRightTrigger <= trigThreshold && !isDrawerOpen)
             {
                 CycleFilters(1);
             }
-
-            // A: Select / Install / Open Drawer
-            if ((pressed & XInputButtons.A) != 0)
+            // A Button: Install (in Drawer) / Compile (in Core) / Manage (in Games)
+            else if ((pressed & XInputButtons.A) != 0)
             {
-                if (_drawerPanel != null && _drawerPanel.Visibility == Visibility.Visible)
+                if (isDrawerOpen)
                 {
                     OnInstallClicked();
+                }
+                else if (_currentTab == "core")
+                {
+                    if (_btnStartBuild != null && _btnStartBuild.IsEnabled)
+                    {
+                        StartNetworkCompilation();
+                    }
+                    else
+                    {
+                        ShowToast("Compilation in progress...");
+                    }
                 }
                 else if (_currentTab == "games" && _focusedGameIndex >= 0 && _focusedGameIndex < _currentRenderedGames.Count)
                 {
                     OpenDrawer(_currentRenderedGames[_focusedGameIndex]);
                 }
             }
-            // B: Back / Close Drawer / Clear Search
+            // X Button: Launch Game (in Drawer or Games) / Open Core dir (in Core)
+            else if ((pressed & XInputButtons.X) != 0)
+            {
+                if (isDrawerOpen)
+                {
+                    OnLaunchClicked();
+                }
+                else if (_currentTab == "games" && _focusedGameIndex >= 0 && _focusedGameIndex < _currentRenderedGames.Count)
+                {
+                    var g = _currentRenderedGames[_focusedGameIndex];
+                    _selectedGame = g;
+                    if (g.Installed)
+                    {
+                        OnLaunchClicked();
+                    }
+                    else
+                    {
+                        OpenDrawer(g);
+                    }
+                }
+                else if (_currentTab == "core")
+                {
+                    if (Directory.Exists(Engine.CoreDir)) OpenFolderInExplorer(Engine.CoreDir);
+                }
+            }
+            // Y Button: Restore (in Drawer) / Toggle View (in Games)
+            else if ((pressed & XInputButtons.Y) != 0)
+            {
+                if (isDrawerOpen)
+                {
+                    OnUninstallClicked();
+                }
+                else
+                {
+                    _isGridView = !_isGridView;
+                    _gamesScrollViewer.Visibility = _isGridView ? Visibility.Visible : Visibility.Collapsed;
+                    _listGamesView.Visibility = _isGridView ? Visibility.Collapsed : Visibility.Visible;
+                    if (_isGridView) UpdateGamepadFocus(_focusedGameIndex);
+                    ShowToast(_isGridView ? "🔲 Grid View" : "☰ List View");
+                }
+            }
+            // B Button: Close Drawer / Back to Games / Clear Search
             else if ((pressed & XInputButtons.B) != 0)
             {
-                if (_drawerPanel != null && _drawerPanel.Visibility == Visibility.Visible)
+                if (isDrawerOpen)
                 {
                     CloseDrawer();
+                }
+                else if (_currentTab != "games")
+                {
+                    SwitchTab("games");
                 }
                 else if (_txtSearch != null && !string.IsNullOrEmpty(_txtSearch.Text))
                 {
                     _txtSearch.Text = "";
                     Focus();
+                }
+            }
+            // Left Thumb Stick Click: Focus Search
+            else if ((pressed & XInputButtons.LEFT_THUMB) != 0)
+            {
+                if (_currentTab != "games") SwitchTab("games");
+                if (_txtSearch != null)
+                {
+                    _txtSearch.Focus();
+                    _txtSearch.SelectAll();
                 }
             }
 

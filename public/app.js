@@ -68,17 +68,20 @@ function showToast(message, type = 'info') {
 }
 
 // Navigation Tabs
+let currentActiveTab = 'games';
 document.querySelectorAll('.nav-item').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     const tabId = btn.dataset.tab;
+    currentActiveTab = tabId;
     const pane = document.getElementById(`tab-${tabId}`);
     if (pane) pane.classList.add('active');
 
     if (tabId === 'core') checkCoreStatus();
     if (tabId === 'about') loadSystemInfo();
+    updateWebHandheldLegend();
   });
 });
 
@@ -246,7 +249,13 @@ function renderGames() {
           <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); openGameDrawerByFolder('${escapeHtml(g.folder)}')">Manage</button>
         </td>
       `;
-      tr.onclick = () => openGameDrawer(g);
+      tr.onclick = () => {
+        document.querySelectorAll('#games-table-body tr').forEach(r => r.classList.remove('selected-row'));
+        tr.classList.add('selected-row');
+        const idx = filteredGames.indexOf(g);
+        if (idx >= 0) gamepadNavIndex = idx;
+      };
+      tr.ondblclick = () => openGameDrawer(g);
       gamesTableBody.appendChild(tr);
     }
   }
@@ -509,12 +518,14 @@ function openGameDrawer(game) {
   // Open Drawer
   drawerBackdrop.classList.add('open');
   gameDrawer.classList.add('open');
+  updateWebHandheldLegend();
 }
 
 function closeGameDrawer() {
   drawerBackdrop.classList.remove('open');
   gameDrawer.classList.remove('open');
   currentGame = null;
+  updateWebHandheldLegend();
 }
 
 drawerBackdrop.addEventListener('click', closeGameDrawer);
@@ -833,7 +844,7 @@ function populateDlssCandidates(games) {
 // Network Build Trigger & EventSource
 document.getElementById('btn-start-build').addEventListener('click', async () => {
   const dlssPath = document.getElementById('dlss-source-select').value;
-  const wave64 = document.getElementById('check-wave64').checked;
+  const wave64 = document.getElementById('check-wave64')?.checked ?? true;
   const consoleOutput = document.getElementById('console-output');
   consoleOutput.textContent = 'Starting build process...\n';
 
@@ -985,13 +996,52 @@ function escapeHtml(str) {
 // Handheld Mode & Gamepad Navigation Support
 // ========================================================
 let isHandheldMode = false;
+let userDisabledHandheldMode = false;
 let gamepadNavIndex = 0;
 let lastGamepadButtons = [];
 let gamepadNavHoldCount = 0;
 let lastNavDir = 0;
 
+function updateWebHandheldLegend() {
+  const bar = document.getElementById('handheld-legend-bar');
+  if (!bar) return;
+
+  const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
+  if (isDrawerOpen) {
+    bar.innerHTML = `
+      <div class="controller-legend-item"><span class="gamepad-badge btn-a">A</span> <span class="legend-text">Install</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-x">X</span> <span class="legend-text">Launch Game</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-y">Y</span> <span class="legend-text">Restore</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-b">B</span> <span class="legend-text">Close</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-shoulder">LB/RB</span> <span class="legend-text">Drawer Tabs</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-special">View</span> <span class="legend-text">Exit Handheld (F11)</span></div>
+    `;
+  } else if (currentActiveTab === 'core') {
+    bar.innerHTML = `
+      <div class="controller-legend-item"><span class="gamepad-badge btn-a">A</span> <span class="legend-text">Compile Network</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-shoulder">LB/RB</span> <span class="legend-text">Tabs</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-b">B</span> <span class="legend-text">Library</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-special">View</span> <span class="legend-text">Exit Handheld (F11)</span></div>
+    `;
+  } else {
+    bar.innerHTML = `
+      <div class="controller-legend-item"><span class="gamepad-badge btn-a">A</span> <span class="legend-text">Manage</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-x">X</span> <span class="legend-text">Launch Game</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-y">Y</span> <span class="legend-text">Toggle View</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-shoulder">LB/RB</span> <span class="legend-text">Tabs</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-shoulder">LT/RT</span> <span class="legend-text">Filters</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-special">View</span> <span class="legend-text">Exit Handheld (F11)</span></div>
+    `;
+  }
+}
+
 function enableHandheldMode(enable, reason = '') {
   isHandheldMode = enable !== undefined ? enable : !isHandheldMode;
+  if (!isHandheldMode) {
+    userDisabledHandheldMode = true;
+  } else {
+    userDisabledHandheldMode = false;
+  }
   const btn = document.getElementById('btn-handheld-toggle');
   const label = document.getElementById('handheld-toggle-label');
 
@@ -1000,6 +1050,7 @@ function enableHandheldMode(enable, reason = '') {
     if (btn) btn.classList.add('active');
     if (label) label.textContent = 'Handheld: ON';
     updateGamepadFocus(gamepadNavIndex);
+    updateWebHandheldLegend();
     showToast(reason ? `🎮 Handheld Mode: ON (${reason})` : '🎮 Handheld Mode: ON (Fullscreen & Controller Navigation Active)', 'success');
   } else {
     document.body.classList.remove('handheld-mode');
@@ -1011,15 +1062,21 @@ function enableHandheldMode(enable, reason = '') {
 }
 
 function updateGamepadFocus(index) {
-  const cards = document.querySelectorAll('.game-card');
-  if (!cards.length) return;
+  const items = currentView === 'grid'
+    ? document.querySelectorAll('.game-card')
+    : document.querySelectorAll('#games-table-body tr');
+  if (!items.length) return;
   if (index < 0) index = 0;
-  if (index >= cards.length) index = cards.length - 1;
+  if (index >= items.length) index = items.length - 1;
   gamepadNavIndex = index;
 
-  cards.forEach((c, idx) => {
+  items.forEach((c, idx) => {
     if (idx === gamepadNavIndex) {
       c.classList.add('gamepad-focused');
+      if (currentView === 'list') {
+        document.querySelectorAll('#games-table-body tr').forEach(r => r.classList.remove('selected-row'));
+        c.classList.add('selected-row');
+      }
       c.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } else {
       c.classList.remove('gamepad-focused');
@@ -1032,10 +1089,21 @@ function clearGamepadFocus() {
 }
 
 function setupGamepadNavigation() {
+  window.addEventListener('gamepadconnected', () => {
+    if (!isHandheldMode && !userDisabledHandheldMode) {
+      enableHandheldMode(true, 'Gamepad controller detected');
+    }
+  });
+
   function gamepadLoop() {
     const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
     const gp = gamepads && gamepads[0];
     if (gp) {
+      // Auto switch to handheld mode on first controller detection
+      if (!isHandheldMode && !userDisabledHandheldMode) {
+        enableHandheldMode(true, 'Gamepad controller detected');
+      }
+
       const btnA = gp.buttons[0] && gp.buttons[0].pressed;
       const btnB = gp.buttons[1] && gp.buttons[1].pressed;
       const btnX = gp.buttons[2] && gp.buttons[2].pressed;
@@ -1069,60 +1137,93 @@ function setupGamepadNavigation() {
         if (btnRef) btnRef.click();
       }
 
-      // LB / RB: Cycle tabs
+      // LB / RB: Cycle main navigation tabs or drawer sub-tabs
       if (isJustPressed(4, btnLB)) {
-        cycleTabsWeb(-1);
-      }
-      if (isJustPressed(5, btnRB)) {
-        cycleTabsWeb(1);
-      }
-
-      // Y: Toggle Grid / List
-      if (isJustPressed(3, btnY)) {
-        if (currentView === 'grid') {
-          const btnL = document.getElementById('btn-view-list');
-          if (btnL) btnL.click();
-        } else {
-          const btnG = document.getElementById('btn-view-grid');
-          if (btnG) btnG.click();
-        }
-      }
-
-      // X: Focus Search Input
-      if (isJustPressed(2, btnX)) {
-        const search = document.getElementById('search-input');
-        if (search) {
-          search.focus();
-          search.select();
-        }
-      }
-
-      // LT / RT: Cycle Status Filter
-      if (isJustPressed(6, btnLT)) {
-        cycleFiltersWeb(-1);
-      }
-      if (isJustPressed(7, btnRT)) {
-        cycleFiltersWeb(1);
-      }
-
-      // A: Select / Install / Open Drawer
-      if (isJustPressed(0, btnA)) {
         const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
         if (isDrawerOpen) {
-          if (drawerBtnInstall) drawerBtnInstall.click();
+          const tabBtns = Array.from(document.querySelectorAll('.drawer-tab-btn'));
+          let activeIdx = tabBtns.findIndex(b => b.classList.contains('active'));
+          if (activeIdx > 0) tabBtns[activeIdx - 1].click();
         } else {
-          const cards = document.querySelectorAll('.game-card');
-          if (cards[gamepadNavIndex]) {
-            cards[gamepadNavIndex].click();
+          cycleTabsWeb(-1);
+        }
+      }
+      if (isJustPressed(5, btnRB)) {
+        const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
+        if (isDrawerOpen) {
+          const tabBtns = Array.from(document.querySelectorAll('.drawer-tab-btn'));
+          let activeIdx = tabBtns.findIndex(b => b.classList.contains('active'));
+          if (activeIdx >= 0 && activeIdx < tabBtns.length - 1) tabBtns[activeIdx + 1].click();
+        } else {
+          cycleTabsWeb(1);
+        }
+      }
+
+      // Y: Toggle Grid / List (in library) or Restore (in drawer)
+      if (isJustPressed(3, btnY)) {
+        const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
+        if (isDrawerOpen) {
+          if (drawerBtnUninstall) drawerBtnUninstall.click();
+        } else {
+          if (currentView === 'grid') {
+            const btnL = document.getElementById('btn-view-list');
+            if (btnL) btnL.click();
+          } else {
+            const btnG = document.getElementById('btn-view-grid');
+            if (btnG) btnG.click();
           }
         }
       }
 
-      // B: Close Drawer / Clear Search
+      // X: Launch Game (in drawer or games) / Search
+      if (isJustPressed(2, btnX)) {
+        const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
+        if (isDrawerOpen) {
+          if (drawerBtnLaunch) drawerBtnLaunch.click();
+        } else if (currentActiveTab === 'games') {
+          if (filteredGames && filteredGames[gamepadNavIndex]) {
+            const g = filteredGames[gamepadNavIndex];
+            if (g.installed) {
+              currentGame = g;
+              if (drawerBtnLaunch) drawerBtnLaunch.click();
+            } else {
+              openGameDrawer(g);
+            }
+          }
+        }
+      }
+
+      // LT / RT: Cycle Status Filter (when drawer is closed)
+      if (isJustPressed(6, btnLT) && !(gameDrawer && gameDrawer.classList.contains('open'))) {
+        cycleFiltersWeb(-1);
+      }
+      if (isJustPressed(7, btnRT) && !(gameDrawer && gameDrawer.classList.contains('open'))) {
+        cycleFiltersWeb(1);
+      }
+
+      // A: Install (in drawer) / Compile (in core tab) / Open Drawer (in games)
+      if (isJustPressed(0, btnA)) {
+        const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
+        if (isDrawerOpen) {
+          if (drawerBtnInstall) drawerBtnInstall.click();
+        } else if (currentActiveTab === 'core') {
+          const btnBuild = document.getElementById('btn-start-build');
+          if (btnBuild && !btnBuild.disabled) btnBuild.click();
+        } else {
+          if (filteredGames && filteredGames[gamepadNavIndex]) {
+            openGameDrawer(filteredGames[gamepadNavIndex]);
+          }
+        }
+      }
+
+      // B: Close Drawer / Back to Games / Clear Search
       if (isJustPressed(1, btnB)) {
         const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
         if (isDrawerOpen) {
           if (btnCloseDrawer) btnCloseDrawer.click();
+        } else if (currentActiveTab !== 'games') {
+          const btnGames = document.querySelector('.nav-item[data-tab="games"]');
+          if (btnGames) btnGames.click();
         } else {
           const search = document.getElementById('search-input');
           if (search && search.value) {
@@ -1170,7 +1271,7 @@ function setupGamepadNavigation() {
 function handleWebDirectionalNav(dir) {
   const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
   if (isDrawerOpen) {
-    const tabBtns = document.querySelectorAll('.dtab-btn');
+    const tabBtns = document.querySelectorAll('.drawer-tab-btn');
     if (tabBtns.length > 0) {
       let activeIdx = Array.from(tabBtns).findIndex(b => b.classList.contains('active'));
       if (dir === 3 && activeIdx > 0) tabBtns[activeIdx - 1].click();
@@ -1179,8 +1280,10 @@ function handleWebDirectionalNav(dir) {
     return;
   }
 
-  const cards = document.querySelectorAll('.game-card');
-  if (!cards.length) return;
+  const items = currentView === 'grid'
+    ? document.querySelectorAll('.game-card')
+    : document.querySelectorAll('#games-table-body tr');
+  if (!items.length) return;
 
   let cols = 1;
   if (currentView === 'grid' && gamesGrid) {
@@ -1195,7 +1298,7 @@ function handleWebDirectionalNav(dir) {
   else if (dir === 4) next = gamepadNavIndex + 1;
 
   if (next < 0) next = 0;
-  if (next >= cards.length) next = cards.length - 1;
+  if (next >= items.length) next = items.length - 1;
 
   updateGamepadFocus(next);
 }

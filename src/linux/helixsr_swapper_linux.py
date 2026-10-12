@@ -1318,11 +1318,12 @@ def get_gpu_info():
 
 def detect_handheld_environment():
     """
-    Detects if the environment is a handheld (SteamOS, Bazzite, Gamescope, or Windows Xbox Mode / Handheld).
-    Returns dict: { isHandheld, isSteamOS, isBazzite, isXboxMode, reason, device }
+    Detects if a gamepad / game controller is connected or handheld CLI flag is passed.
+    Returns dict: { isHandheld, isControllerDetected, isSteamOS, isBazzite, isXboxMode, reason, device }
     """
     info = {
         "isHandheld": False,
+        "isControllerDetected": False,
         "isSteamOS": False,
         "isBazzite": False,
         "isXboxMode": False,
@@ -1330,100 +1331,55 @@ def detect_handheld_environment():
         "device": "",
     }
 
-    # 1. Environment variables
-    if os.environ.get("STEAM_DECK") == "1" or os.environ.get("SteamGamepadUI") == "1":
+    # 1. CLI flag or explicit environment variable
+    if "--handheld" in sys.argv or os.environ.get("HELIXSR_HANDHELD") == "1":
         info["isHandheld"] = True
-        info["isSteamOS"] = True
-        info["reason"] = "Steam Deck environment variable active"
-        info["device"] = "Steam Deck"
+        info["isControllerDetected"] = True
+        info["reason"] = "Command-line flag or environment variable active"
+        info["device"] = "Handheld Mode"
         return info
 
-    xdg_desk = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
-    session = os.environ.get("DESKTOP_SESSION", "").lower()
-    if "gamescope" in xdg_desk or "gamescope" in session or "steamos" in xdg_desk or "steamos" in session:
-        info["isHandheld"] = True
-        info["isSteamOS"] = True
-        info["reason"] = "Gamescope / SteamOS session active"
-        info["device"] = "SteamOS Handheld"
-        return info
-
-    if os.environ.get("XBOX_MODE") == "1" or os.environ.get("HELIXSR_HANDHELD") == "1":
-        info["isHandheld"] = True
-        info["isXboxMode"] = True
-        info["reason"] = "Xbox / Handheld environment variable active"
-        info["device"] = "Xbox Handheld Mode"
-        return info
-
-    # 2. Check /etc/os-release or /usr/lib/os-release
-    for os_file in ("/etc/os-release", "/usr/lib/os-release"):
-        if os.path.isfile(os_file):
-            try:
-                with open(os_file, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read().lower()
-                    if "id=steamos" in content or 'id="steamos"' in content or "id_like=steamos" in content or "variant_id=steamdeck" in content:
-                        info["isHandheld"] = True
-                        info["isSteamOS"] = True
-                        info["reason"] = "SteamOS distribution detected"
-                        info["device"] = "SteamOS Handheld"
-                        return info
-                    if "id=bazzite" in content or 'id="bazzite"' in content or "id_like=bazzite" in content:
-                        info["isHandheld"] = True
-                        info["isBazzite"] = True
-                        info["reason"] = "Bazzite distribution detected"
-                        info["device"] = "Bazzite Handheld"
-                        return info
-                    if "steamos" in content:
-                        info["isHandheld"] = True
-                        info["isSteamOS"] = True
-                        info["reason"] = "SteamOS distribution detected"
-                        info["device"] = "SteamOS"
-                        return info
-                    if "bazzite" in content:
-                        info["isHandheld"] = True
-                        info["isBazzite"] = True
-                        info["reason"] = "Bazzite distribution detected"
-                        info["device"] = "Bazzite"
-                        return info
-            except Exception:
-                pass
-
-    # 3. Check DMI product name for Steam Deck or known handhelds
-    for dmi_path in ("/sys/devices/virtual/dmi/id/product_name", "/sys/class/dmi/id/product_name"):
-        if os.path.isfile(dmi_path):
-            try:
-                with open(dmi_path, "r", encoding="utf-8", errors="ignore") as f:
-                    dmi = f.read().strip().lower()
-                    if "jupiter" in dmi or "galileo" in dmi or "steam deck" in dmi:
-                        info["isHandheld"] = True
-                        info["isSteamOS"] = True
-                        info["reason"] = f"Steam Deck hardware detected ({dmi})"
-                        info["device"] = "Steam Deck"
-                        return info
-                    for h_name in ("rog ally", "legion go", "claw", "ayaneo", "gpd", "onexplayer", "aokzoe"):
-                        if h_name in dmi:
-                            info["isHandheld"] = True
-                            info["reason"] = f"Handheld hardware detected ({dmi})"
-                            info["device"] = dmi
-                            return info
-            except Exception:
-                pass
-
-    # 4. Check Windows Registry if running Python on Windows
-    if os.name == "nt":
+    # 2. Check for connected gamepad / joystick on Linux (/dev/input/js* or event devices)
+    if os.name != "nt":
         try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\GamingConfiguration") as k:
-                for val_name in ("GamingHomeApp", "EnterGamingPostureOnStartup", "GamingPosture", "XboxMode"):
-                    try:
-                        v, _ = winreg.QueryValueEx(k, val_name)
-                        if v:
-                            info["isHandheld"] = True
-                            info["isXboxMode"] = True
-                            info["reason"] = "Windows Xbox Mode (Full Screen Experience) active"
-                            info["device"] = "Xbox Handheld Experience"
-                            return info
-                    except Exception:
-                        pass
+            import glob
+            js_devices = glob.glob("/dev/input/js*")
+            if js_devices:
+                info["isHandheld"] = True
+                info["isControllerDetected"] = True
+                info["reason"] = f"Gamepad controller detected ({os.path.basename(js_devices[0])})"
+                info["device"] = "Controller"
+                return info
+            by_id = glob.glob("/dev/input/by-id/*joystick*") + glob.glob("/dev/input/by-id/*gamepad*")
+            if by_id:
+                info["isHandheld"] = True
+                info["isControllerDetected"] = True
+                info["reason"] = "Gamepad controller detected in /dev/input/by-id"
+                info["device"] = "Controller"
+                return info
+        except Exception:
+            pass
+    else:
+        # Check Windows XInput if running under Python on Windows
+        try:
+            import ctypes
+            for dll_name in ("xinput1_4.dll", "xinput9_1_0.dll", "xinput1_3.dll"):
+                try:
+                    xi = ctypes.windll.LoadLibrary(dll_name)
+                    if hasattr(xi, "XInputGetState"):
+                        class XINPUT_STATE(ctypes.Structure):
+                            _fields_ = [("dwPacketNumber", ctypes.c_uint32), ("Gamepad", ctypes.c_byte * 12)]
+                        st = XINPUT_STATE()
+                        for i in range(4):
+                            if xi.XInputGetState(i, ctypes.byref(st)) == 0:
+                                info["isHandheld"] = True
+                                info["isControllerDetected"] = True
+                                info["reason"] = "Gamepad controller detected via XInput"
+                                info["device"] = "Controller"
+                                return info
+                        break
+                except Exception:
+                    pass
         except Exception:
             pass
 

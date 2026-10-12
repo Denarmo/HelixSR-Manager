@@ -131,6 +131,14 @@ namespace HelixSRSwapper
         private Button _btnDrawerInstall;
         private Button _btnDrawerUninstall;
         private Button _btnDrawerLaunch;
+        private Button _btnDrawerFolder;
+        private Button _btnDrawerBackup;
+        private Button _btnDrawerMyFsr;
+        private Button _btnDrawerPurgeCache;
+        private ScrollViewer _drawerScrollViewer;
+        private int _drawerFocusRow = 0;
+        private int _drawerFocusCol = 0;
+        private Control _lastDrawerFocusedControl = null;
         private TextBlock _txtDrawerExe;
         private TextBlock _txtDrawerFolder;
         private TextBlock _txtDrawerInputs;
@@ -1840,7 +1848,7 @@ namespace HelixSRSwapper
             dock.Children.Add(_bannerDrawerHero);
 
             // Scrollable Content
-            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            _drawerScrollViewer = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
             var contentStack = new StackPanel { Margin = new Thickness(18, 14, 18, 18) };
 
             // Installation Method Selection Box
@@ -1945,19 +1953,19 @@ namespace HelixSRSwapper
 
             // Folder Shortcuts & Maintenance
             var shortcuts = new UniformGrid { Columns = 4, Margin = new Thickness(0, 0, 0, 14) };
-            var btnFolder = CreateButton("📁 Folder", BgCard, TextMain, delegate { if (_selectedGame != null) OpenFolderInExplorer(_selectedGame.ExeFolder ?? _selectedGame.Folder); });
-            btnFolder.Margin = new Thickness(0, 0, 4, 0);
-            var btnBackup = CreateButton("📂 Backups", BgCard, TextMain, delegate { if (_selectedGame != null) OpenFolderInExplorer(Path.Combine(_selectedGame.ExeFolder ?? _selectedGame.Folder, "HelixSR", "backup")); });
-            btnBackup.Margin = new Thickness(2, 0, 2, 0);
-            var btnMyFsr = CreateButton("📦 my-fsr", BgCard, TextMain, delegate { if (_selectedGame != null) OpenFolderInExplorer(Path.Combine(_selectedGame.ExeFolder ?? _selectedGame.Folder, "HelixSR", "my-fsr")); });
-            btnMyFsr.Margin = new Thickness(2, 0, 2, 0);
-            var btnPurgeCache = CreateButton("🧹 Cache", BgCard, TextMain, delegate { OnClearShaderCacheClicked(); });
-            btnPurgeCache.Margin = new Thickness(4, 0, 0, 0);
-            btnPurgeCache.ToolTip = "Purges Capcom RE Engine (shader.cache2) and DirectX 12 corrupted pipeline state objects.";
-            shortcuts.Children.Add(btnFolder);
-            shortcuts.Children.Add(btnBackup);
-            shortcuts.Children.Add(btnMyFsr);
-            shortcuts.Children.Add(btnPurgeCache);
+            _btnDrawerFolder = CreateButton("📁 Folder", BgCard, TextMain, delegate { if (_selectedGame != null) OpenFolderInExplorer(_selectedGame.ExeFolder ?? _selectedGame.Folder); });
+            _btnDrawerFolder.Margin = new Thickness(0, 0, 4, 0);
+            _btnDrawerBackup = CreateButton("📂 Backups", BgCard, TextMain, delegate { if (_selectedGame != null) OpenFolderInExplorer(Path.Combine(_selectedGame.ExeFolder ?? _selectedGame.Folder, "HelixSR", "backup")); });
+            _btnDrawerBackup.Margin = new Thickness(2, 0, 2, 0);
+            _btnDrawerMyFsr = CreateButton("📦 my-fsr", BgCard, TextMain, delegate { if (_selectedGame != null) OpenFolderInExplorer(Path.Combine(_selectedGame.ExeFolder ?? _selectedGame.Folder, "HelixSR", "my-fsr")); });
+            _btnDrawerMyFsr.Margin = new Thickness(2, 0, 2, 0);
+            _btnDrawerPurgeCache = CreateButton("🧹 Cache", BgCard, TextMain, delegate { OnClearShaderCacheClicked(); });
+            _btnDrawerPurgeCache.Margin = new Thickness(4, 0, 0, 0);
+            _btnDrawerPurgeCache.ToolTip = "Purges Capcom RE Engine (shader.cache2) and DirectX 12 corrupted pipeline state objects.";
+            shortcuts.Children.Add(_btnDrawerFolder);
+            shortcuts.Children.Add(_btnDrawerBackup);
+            shortcuts.Children.Add(_btnDrawerMyFsr);
+            shortcuts.Children.Add(_btnDrawerPurgeCache);
             contentStack.Children.Add(shortcuts);
 
             // Target Game Telemetry Card
@@ -2116,8 +2124,8 @@ namespace HelixSRSwapper
 
             SwitchDrawerTab(_currentDrawerTab);
 
-            scroll.Content = contentStack;
-            dock.Children.Add(scroll);
+            _drawerScrollViewer.Content = contentStack;
+            dock.Children.Add(_drawerScrollViewer);
 
             drawer.Children.Add(borderLeft);
             drawer.Children.Add(dock);
@@ -2377,10 +2385,9 @@ namespace HelixSRSwapper
             _txtDrawerStatus.Foreground = game.Installed ? AccentEmerald : TextDim;
 
             _btnDrawerInstall.Content = game.Installed ? "⚡ Update / Reinstall" : "⚡ Install HelixSR";
-            if (_isHandheldMode) _btnDrawerInstall.Content += " [A]";
             _btnDrawerUninstall.Visibility = game.Installed ? Visibility.Visible : Visibility.Collapsed;
-            if (_btnDrawerUninstall != null) _btnDrawerUninstall.Content = _isHandheldMode ? "↩ Restore [Y]" : "↩ Restore";
-            if (_btnDrawerLaunch != null) _btnDrawerLaunch.Content = _isHandheldMode ? "▶ Launch Game [X]" : "▶ Launch Game";
+            if (_btnDrawerUninstall != null) _btnDrawerUninstall.Content = "↩ Restore";
+            if (_btnDrawerLaunch != null) _btnDrawerLaunch.Content = "▶ Launch Game";
 
             _txtDrawerExe.Text = game.ExeName ?? "N/A";
             _txtDrawerFolder.Text = game.ExeFolder ?? game.Folder;
@@ -2401,6 +2408,13 @@ namespace HelixSRSwapper
             _drawerPanel.Visibility = Visibility.Visible;
             UpdateHandheldLegend();
 
+            if (_isHandheldMode)
+            {
+                _drawerFocusRow = 0;
+                _drawerFocusCol = 0;
+                UpdateDrawerFocus();
+            }
+
             if (wasClosed)
             {
                 var tt = _drawerPanel.RenderTransform as TranslateTransform;
@@ -2417,9 +2431,273 @@ namespace HelixSRSwapper
 
         private void CloseDrawer()
         {
+            if (_lastDrawerFocusedControl != null)
+            {
+                ClearDrawerFocusVisual(_lastDrawerFocusedControl);
+                _lastDrawerFocusedControl = null;
+            }
             _drawerPanel.Visibility = Visibility.Collapsed;
             _selectedGame = null;
             UpdateHandheldLegend();
+        }
+
+        private List<List<Control>> GetDrawerNavRows()
+        {
+            var rows = new List<List<Control>>();
+
+            // Row 0: Installation Method ComboBox
+            if (_cmbDrawerInstallMethod != null && _cmbDrawerInstallMethod.Visibility == Visibility.Visible)
+            {
+                rows.Add(new List<Control> { _cmbDrawerInstallMethod });
+            }
+
+            // Row 1: Frame Generation ComboBox (only if visible)
+            if (_panelDrawerFg != null && _panelDrawerFg.Visibility == Visibility.Visible && _cmbDrawerFgMode != null && _cmbDrawerFgMode.Visibility == Visibility.Visible)
+            {
+                rows.Add(new List<Control> { _cmbDrawerFgMode });
+            }
+
+            // Row 2: FakeNVAPI CheckBox (only if visible)
+            if (_chkDrawerFakeNvapi != null && _chkDrawerFakeNvapi.Visibility == Visibility.Visible)
+            {
+                rows.Add(new List<Control> { _chkDrawerFakeNvapi });
+            }
+
+            // Row 3: REFramework CheckBox (only if visible)
+            if (_chkDrawerReFramework != null && _chkDrawerReFramework.Visibility == Visibility.Visible)
+            {
+                rows.Add(new List<Control> { _chkDrawerReFramework });
+            }
+
+            // Row 4: Primary Action Buttons (Install, Restore [if visible], Launch Game)
+            var actRow = new List<Control>();
+            if (_btnDrawerInstall != null && _btnDrawerInstall.Visibility == Visibility.Visible) actRow.Add(_btnDrawerInstall);
+            if (_btnDrawerUninstall != null && _btnDrawerUninstall.Visibility == Visibility.Visible) actRow.Add(_btnDrawerUninstall);
+            if (_btnDrawerLaunch != null && _btnDrawerLaunch.Visibility == Visibility.Visible) actRow.Add(_btnDrawerLaunch);
+            if (actRow.Count > 0) rows.Add(actRow);
+
+            // Row 5: Shortcut buttons (Folder, Backups, my-fsr, Cache)
+            var scRow = new List<Control>();
+            if (_btnDrawerFolder != null && _btnDrawerFolder.Visibility == Visibility.Visible) scRow.Add(_btnDrawerFolder);
+            if (_btnDrawerBackup != null && _btnDrawerBackup.Visibility == Visibility.Visible) scRow.Add(_btnDrawerBackup);
+            if (_btnDrawerMyFsr != null && _btnDrawerMyFsr.Visibility == Visibility.Visible) scRow.Add(_btnDrawerMyFsr);
+            if (_btnDrawerPurgeCache != null && _btnDrawerPurgeCache.Visibility == Visibility.Visible) scRow.Add(_btnDrawerPurgeCache);
+            if (scRow.Count > 0) rows.Add(scRow);
+
+            // Row 6: Drawer Tabs (Guide, INI, Logs)
+            var tabRow = new List<Control>();
+            if (_btnDrawerTabGuide != null && _btnDrawerTabGuide.Visibility == Visibility.Visible) tabRow.Add(_btnDrawerTabGuide);
+            if (_btnDrawerTabIni != null && _btnDrawerTabIni.Visibility == Visibility.Visible) tabRow.Add(_btnDrawerTabIni);
+            if (_btnDrawerTabLogs != null && _btnDrawerTabLogs.Visibility == Visibility.Visible) tabRow.Add(_btnDrawerTabLogs);
+            if (tabRow.Count > 0) rows.Add(tabRow);
+
+            return rows;
+        }
+
+        private void UpdateDrawerFocus()
+        {
+            var rows = GetDrawerNavRows();
+            if (rows.Count == 0) return;
+
+            if (_drawerFocusRow < 0) _drawerFocusRow = 0;
+            if (_drawerFocusRow >= rows.Count) _drawerFocusRow = rows.Count - 1;
+
+            var curRow = rows[_drawerFocusRow];
+            if (curRow.Count == 0) return;
+
+            if (_drawerFocusCol < 0) _drawerFocusCol = 0;
+            if (_drawerFocusCol >= curRow.Count) _drawerFocusCol = curRow.Count - 1;
+
+            Control target = curRow[_drawerFocusCol];
+
+            if (_lastDrawerFocusedControl != null && _lastDrawerFocusedControl != target)
+            {
+                ClearDrawerFocusVisual(_lastDrawerFocusedControl);
+            }
+
+            _lastDrawerFocusedControl = target;
+            ApplyDrawerFocusVisual(target);
+            target.Focus();
+            target.BringIntoView();
+        }
+
+        private void ApplyDrawerFocusVisual(Control ctrl)
+        {
+            if (ctrl == null) return;
+            ctrl.BorderBrush = AccentEmeraldStrong;
+            ctrl.BorderThickness = new Thickness(2.5);
+            ctrl.Effect = new DropShadowEffect
+            {
+                Color = Color.FromRgb(241, 196, 15),
+                BlurRadius = 20,
+                ShadowDepth = 0,
+                Opacity = 0.95
+            };
+            if (ctrl is System.Windows.Controls.CheckBox)
+            {
+                ctrl.Background = new SolidColorBrush(Color.FromArgb(40, 46, 204, 113));
+            }
+        }
+
+        private void ClearDrawerFocusVisual(Control ctrl)
+        {
+            if (ctrl == null) return;
+            ctrl.Effect = null;
+            if (ctrl == _btnDrawerInstall)
+            {
+                ctrl.BorderBrush = AccentEmeraldStrong;
+                ctrl.BorderThickness = new Thickness(1);
+            }
+            else if (ctrl == _btnDrawerUninstall)
+            {
+                ctrl.BorderBrush = AccentRed;
+                ctrl.BorderThickness = new Thickness(1);
+            }
+            else
+            {
+                ctrl.BorderBrush = BorderColor;
+                ctrl.BorderThickness = new Thickness(1);
+            }
+            if (ctrl is System.Windows.Controls.CheckBox)
+            {
+                ctrl.Background = Brushes.Transparent;
+            }
+        }
+
+        private void HandleDrawerDirectionalNav(int dir)
+        {
+            var rows = GetDrawerNavRows();
+            if (rows.Count == 0) return;
+
+            if (_drawerFocusRow < 0) _drawerFocusRow = 0;
+            if (_drawerFocusRow >= rows.Count) _drawerFocusRow = rows.Count - 1;
+
+            if (dir == 1) // Up
+            {
+                _drawerFocusRow--;
+                if (_drawerFocusRow < 0) _drawerFocusRow = rows.Count - 1;
+                var newRow = rows[_drawerFocusRow];
+                if (_drawerFocusCol >= newRow.Count) _drawerFocusCol = newRow.Count - 1;
+                UpdateDrawerFocus();
+            }
+            else if (dir == 2) // Down
+            {
+                _drawerFocusRow++;
+                if (_drawerFocusRow >= rows.Count) _drawerFocusRow = 0;
+                var newRow = rows[_drawerFocusRow];
+                if (_drawerFocusCol >= newRow.Count) _drawerFocusCol = newRow.Count - 1;
+                UpdateDrawerFocus();
+            }
+            else if (dir == 3) // Left
+            {
+                var curRow = rows[_drawerFocusRow];
+                if (curRow.Count > 1)
+                {
+                    _drawerFocusCol--;
+                    if (_drawerFocusCol < 0) _drawerFocusCol = curRow.Count - 1;
+                    UpdateDrawerFocus();
+                }
+                else if (curRow.Count == 1)
+                {
+                    Control c = curRow[0];
+                    var cmb = c as ComboBox;
+                    if (cmb != null && cmb.Items.Count > 1)
+                    {
+                        int prev = cmb.SelectedIndex - 1;
+                        if (prev < 0) prev = cmb.Items.Count - 1;
+                        cmb.SelectedIndex = prev;
+                        var cbi = cmb.SelectedItem as ComboBoxItem;
+                        string label = (cbi != null && cbi.Content != null) ? cbi.Content.ToString() : "";
+                        ShowToast("Selected: " + label);
+                        UpdateDrawerFocus();
+                    }
+                    else
+                    {
+                        var chk = c as System.Windows.Controls.CheckBox;
+                        if (chk != null)
+                        {
+                            chk.IsChecked = !chk.IsChecked.GetValueOrDefault(false);
+                            ShowToast((chk.IsChecked == true ? "✔ " : "✖ ") + (chk.Content != null ? chk.Content.ToString() : ""));
+                        }
+                    }
+                }
+            }
+            else if (dir == 4) // Right
+            {
+                var curRow = rows[_drawerFocusRow];
+                if (curRow.Count > 1)
+                {
+                    _drawerFocusCol++;
+                    if (_drawerFocusCol >= curRow.Count) _drawerFocusCol = 0;
+                    UpdateDrawerFocus();
+                }
+                else if (curRow.Count == 1)
+                {
+                    Control c = curRow[0];
+                    var cmb = c as ComboBox;
+                    if (cmb != null && cmb.Items.Count > 1)
+                    {
+                        int next = cmb.SelectedIndex + 1;
+                        if (next >= cmb.Items.Count) next = 0;
+                        cmb.SelectedIndex = next;
+                        var cbi = cmb.SelectedItem as ComboBoxItem;
+                        string label = (cbi != null && cbi.Content != null) ? cbi.Content.ToString() : "";
+                        ShowToast("Selected: " + label);
+                        UpdateDrawerFocus();
+                    }
+                    else
+                    {
+                        var chk = c as System.Windows.Controls.CheckBox;
+                        if (chk != null)
+                        {
+                            chk.IsChecked = !chk.IsChecked.GetValueOrDefault(false);
+                            ShowToast((chk.IsChecked == true ? "✔ " : "✖ ") + (chk.Content != null ? chk.Content.ToString() : ""));
+                        }
+                    }
+                }
+            }
+        }
+
+        private void ActivateCurrentDrawerControl()
+        {
+            var rows = GetDrawerNavRows();
+            if (rows.Count == 0) return;
+
+            if (_drawerFocusRow < 0) _drawerFocusRow = 0;
+            if (_drawerFocusRow >= rows.Count) _drawerFocusRow = rows.Count - 1;
+
+            var curRow = rows[_drawerFocusRow];
+            if (_drawerFocusCol < 0) _drawerFocusCol = 0;
+            if (_drawerFocusCol >= curRow.Count) _drawerFocusCol = curRow.Count - 1;
+
+            Control c = curRow[_drawerFocusCol];
+            var cmb = c as ComboBox;
+            if (cmb != null)
+            {
+                if (cmb.Items.Count > 1)
+                {
+                    cmb.SelectedIndex = (cmb.SelectedIndex + 1) % cmb.Items.Count;
+                    var cbi = cmb.SelectedItem as ComboBoxItem;
+                    string label = (cbi != null && cbi.Content != null) ? cbi.Content.ToString() : "";
+                    ShowToast("Selected: " + label);
+                    UpdateDrawerFocus();
+                }
+                return;
+            }
+
+            var chk = c as System.Windows.Controls.CheckBox;
+            if (chk != null)
+            {
+                chk.IsChecked = !chk.IsChecked.GetValueOrDefault(false);
+                ShowToast((chk.IsChecked == true ? "✔ " : "✖ ") + (chk.Content != null ? chk.Content.ToString() : ""));
+                return;
+            }
+
+            var btn = c as Button;
+            if (btn != null && btn.IsEnabled)
+            {
+                btn.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            }
         }
 
         private void RefreshLogs()
@@ -3609,10 +3887,10 @@ namespace HelixSRSwapper
                     _btnHandheldToggle.BorderBrush = AccentEmerald;
                 }
 
-                if (_btnDrawerInstall != null) _btnDrawerInstall.Content = (_selectedGame != null && _selectedGame.Installed) ? "⚡ Update / Reinstall [A]" : "⚡ Install HelixSR [A]";
-                if (_btnDrawerLaunch != null) _btnDrawerLaunch.Content = "▶ Launch Game [X]";
-                if (_btnDrawerUninstall != null) _btnDrawerUninstall.Content = "↩ Restore [Y]";
-                if (_btnStartBuild != null) _btnStartBuild.Content = "⚡ Compile HelixSR Network [A]";
+                if (_btnDrawerInstall != null) _btnDrawerInstall.Content = (_selectedGame != null && _selectedGame.Installed) ? "⚡ Update / Reinstall" : "⚡ Install HelixSR";
+                if (_btnDrawerLaunch != null) _btnDrawerLaunch.Content = "▶ Launch Game";
+                if (_btnDrawerUninstall != null) _btnDrawerUninstall.Content = "↩ Restore";
+                if (_btnStartBuild != null) _btnStartBuild.Content = "⚡ Compile HelixSR Network";
 
                 UpdateHandheldLegend();
 
@@ -3683,10 +3961,9 @@ namespace HelixSRSwapper
             bool isDrawerOpen = _drawerPanel != null && _drawerPanel.Visibility == Visibility.Visible;
             if (isDrawerOpen)
             {
-                _handheldLegendStack.Children.Add(CreateLegendItem("A", Color.FromRgb(46, 204, 113), "Install"));
-                _handheldLegendStack.Children.Add(CreateLegendItem("X", Color.FromRgb(52, 152, 219), "Launch Game"));
-                _handheldLegendStack.Children.Add(CreateLegendItem("Y", Color.FromRgb(241, 196, 15), "Restore"));
-                _handheldLegendStack.Children.Add(CreateLegendItem("B", Color.FromRgb(231, 76, 60), "Close"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("D-Pad / Stick", Color.FromRgb(52, 152, 219), "Navigate / Change"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("A", Color.FromRgb(46, 204, 113), "Select / Toggle"));
+                _handheldLegendStack.Children.Add(CreateLegendItem("B", Color.FromRgb(231, 76, 60), "Close Drawer"));
                 _handheldLegendStack.Children.Add(CreateLegendItem("LB/RB", Color.FromRgb(149, 165, 166), "Tabs (Guide/INI/Logs)"));
                 _handheldLegendStack.Children.Add(CreateLegendItem("View", Color.FromRgb(155, 89, 182), "Exit Handheld (F11)"));
             }
@@ -3842,12 +4119,12 @@ namespace HelixSRSwapper
             {
                 CycleFilters(1);
             }
-            // A Button: Install (in Drawer) / Compile (in Core) / Manage (in Games)
+            // A Button: Activate focused control (in Drawer) / Compile (in Core) / Manage (in Games)
             else if ((pressed & XInputButtons.A) != 0)
             {
                 if (isDrawerOpen)
                 {
-                    OnInstallClicked();
+                    ActivateCurrentDrawerControl();
                 }
                 else if (_currentTab == "core")
                 {
@@ -3865,12 +4142,12 @@ namespace HelixSRSwapper
                     OpenDrawer(_currentRenderedGames[_focusedGameIndex]);
                 }
             }
-            // X Button: Launch Game (in Drawer or Games) / Open Core dir (in Core)
+            // X Button: Launch Game (in Games) / Open Core dir (in Core)
             else if ((pressed & XInputButtons.X) != 0)
             {
                 if (isDrawerOpen)
                 {
-                    OnLaunchClicked();
+                    // Full controller navigation used in drawer (no direct shortcut)
                 }
                 else if (_currentTab == "games" && _focusedGameIndex >= 0 && _focusedGameIndex < _currentRenderedGames.Count)
                 {
@@ -3890,12 +4167,12 @@ namespace HelixSRSwapper
                     if (Directory.Exists(Engine.CoreDir)) OpenFolderInExplorer(Engine.CoreDir);
                 }
             }
-            // Y Button: Restore (in Drawer) / Toggle View (in Games)
+            // Y Button: Toggle View (in Games)
             else if ((pressed & XInputButtons.Y) != 0)
             {
                 if (isDrawerOpen)
                 {
-                    OnUninstallClicked();
+                    // Full controller navigation used in drawer (no direct shortcut)
                 }
                 else
                 {
@@ -3980,16 +4257,7 @@ namespace HelixSRSwapper
         {
             if (_drawerPanel != null && _drawerPanel.Visibility == Visibility.Visible)
             {
-                if (dir == 3) // Left
-                {
-                    if (_currentDrawerTab == "logs") SwitchDrawerTab("ini");
-                    else if (_currentDrawerTab == "ini") SwitchDrawerTab("guide");
-                }
-                else if (dir == 4) // Right
-                {
-                    if (_currentDrawerTab == "guide") SwitchDrawerTab("ini");
-                    else if (_currentDrawerTab == "ini") SwitchDrawerTab("logs");
-                }
+                HandleDrawerDirectionalNav(dir);
                 return;
             }
 

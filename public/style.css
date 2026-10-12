@@ -1346,6 +1346,25 @@ tr.selected-row {
   border-left: 3px solid var(--accent-emerald) !important;
 }
 
+/* Drawer Gamepad Focus Ring */
+.drawer-gamepad-focused {
+  outline: 3px solid var(--accent-emerald) !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 20px rgba(241, 196, 15, 0.85) !important;
+  border-color: var(--accent-emerald) !important;
+  z-index: 10 !important;
+  transition: outline 0.1s ease, box-shadow 0.1s ease;
+}
+
+label.checkbox-label:has(.drawer-gamepad-focused),
+label.checkbox-label.drawer-gamepad-focused {
+  outline: 2px solid var(--accent-emerald) !important;
+  outline-offset: 4px;
+  border-radius: 6px;
+  box-shadow: 0 0 16px rgba(241, 196, 15, 0.65) !important;
+  background: rgba(46, 204, 113, 0.1) !important;
+}
+
 /* Controller Legend Badges */
 .controller-legend-item {
   display: flex;

@@ -519,9 +519,16 @@ function openGameDrawer(game) {
   drawerBackdrop.classList.add('open');
   gameDrawer.classList.add('open');
   updateWebHandheldLegend();
+
+  if (isHandheldMode) {
+    drawerFocusRow = 0;
+    drawerFocusCol = 0;
+    setTimeout(updateDrawerFocusWeb, 50);
+  }
 }
 
 function closeGameDrawer() {
+  clearDrawerFocusWeb();
   drawerBackdrop.classList.remove('open');
   gameDrawer.classList.remove('open');
   currentGame = null;
@@ -1002,6 +1009,198 @@ let lastGamepadButtons = [];
 let gamepadNavHoldCount = 0;
 let lastNavDir = 0;
 
+let drawerFocusRow = 0;
+let drawerFocusCol = 0;
+let lastDrawerFocusedEl = null;
+
+function getDrawerNavRows() {
+  const rows = [];
+
+  // Row 0: Installation Method select
+  const selMethod = document.getElementById('drawer-install-method');
+  if (selMethod && selMethod.offsetParent !== null) {
+    rows.push([selMethod]);
+  }
+
+  // Row 1: Frame Generation select (only if wrapper visible)
+  const fgWrap = document.getElementById('drawer-fg-wrap');
+  const selFg = document.getElementById('drawer-fg-mode');
+  if (fgWrap && fgWrap.style.display !== 'none' && selFg && selFg.offsetParent !== null) {
+    rows.push([selFg]);
+  }
+
+  // Row 2: FakeNVAPI checkbox (only if wrapper visible)
+  const fakeWrap = document.getElementById('drawer-fakenvapi-wrap');
+  const chkFake = document.getElementById('drawer-chk-fakenvapi');
+  if (fakeWrap && fakeWrap.style.display !== 'none' && chkFake && chkFake.offsetParent !== null) {
+    rows.push([chkFake]);
+  }
+
+  // Row 3: REFramework checkbox
+  const chkRef = document.getElementById('drawer-chk-reframework');
+  if (chkRef && chkRef.offsetParent !== null) {
+    rows.push([chkRef]);
+  }
+
+  // Row 4: Primary Actions
+  const actRow = [];
+  const btnInstall = document.getElementById('drawer-btn-install');
+  const btnUninstall = document.getElementById('drawer-btn-uninstall');
+  const btnLaunch = document.getElementById('drawer-btn-launch');
+  if (btnInstall && btnInstall.offsetParent !== null) actRow.push(btnInstall);
+  if (btnUninstall && btnUninstall.offsetParent !== null && btnUninstall.style.display !== 'none') actRow.push(btnUninstall);
+  if (btnLaunch && btnLaunch.offsetParent !== null) actRow.push(btnLaunch);
+  if (actRow.length > 0) rows.push(actRow);
+
+  // Row 5: Shortcut Buttons
+  const scRow = [];
+  ['drawer-btn-open-game', 'drawer-btn-open-backup', 'drawer-btn-open-myfsr', 'drawer-btn-clear-cache'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.offsetParent !== null) scRow.push(el);
+  });
+  if (scRow.length > 0) rows.push(scRow);
+
+  // Row 6: Sub Tabs
+  const tabBtns = Array.from(document.querySelectorAll('.drawer-tab-btn')).filter(el => el.offsetParent !== null);
+  if (tabBtns.length > 0) rows.push(tabBtns);
+
+  return rows;
+}
+
+function updateDrawerFocusWeb() {
+  const rows = getDrawerNavRows();
+  if (!rows.length) return;
+
+  if (drawerFocusRow < 0) drawerFocusRow = 0;
+  if (drawerFocusRow >= rows.length) drawerFocusRow = rows.length - 1;
+
+  const curRow = rows[drawerFocusRow];
+  if (!curRow.length) return;
+
+  if (drawerFocusCol < 0) drawerFocusCol = 0;
+  if (drawerFocusCol >= curRow.length) drawerFocusCol = curRow.length - 1;
+
+  const target = curRow[drawerFocusCol];
+
+  if (lastDrawerFocusedEl && lastDrawerFocusedEl !== target) {
+    lastDrawerFocusedEl.classList.remove('drawer-gamepad-focused');
+    const prevLabel = lastDrawerFocusedEl.closest('label.checkbox-label');
+    if (prevLabel) prevLabel.classList.remove('drawer-gamepad-focused');
+  }
+
+  lastDrawerFocusedEl = target;
+  target.classList.add('drawer-gamepad-focused');
+  const label = target.closest('label.checkbox-label');
+  if (label) label.classList.add('drawer-gamepad-focused');
+
+  target.focus();
+  target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function clearDrawerFocusWeb() {
+  if (lastDrawerFocusedEl) {
+    lastDrawerFocusedEl.classList.remove('drawer-gamepad-focused');
+    const label = lastDrawerFocusedEl.closest('label.checkbox-label');
+    if (label) label.classList.remove('drawer-gamepad-focused');
+    lastDrawerFocusedEl = null;
+  }
+  document.querySelectorAll('.drawer-gamepad-focused').forEach(el => el.classList.remove('drawer-gamepad-focused'));
+}
+
+function handleDrawerDirectionalNavWeb(dir) {
+  const rows = getDrawerNavRows();
+  if (!rows.length) return;
+
+  if (drawerFocusRow < 0) drawerFocusRow = 0;
+  if (drawerFocusRow >= rows.length) drawerFocusRow = rows.length - 1;
+
+  if (dir === 1) { // Up
+    drawerFocusRow--;
+    if (drawerFocusRow < 0) drawerFocusRow = rows.length - 1;
+    const newRow = rows[drawerFocusRow];
+    if (drawerFocusCol >= newRow.length) drawerFocusCol = newRow.length - 1;
+    updateDrawerFocusWeb();
+  } else if (dir === 2) { // Down
+    drawerFocusRow++;
+    if (drawerFocusRow >= rows.length) drawerFocusRow = 0;
+    const newRow = rows[drawerFocusRow];
+    if (drawerFocusCol >= newRow.length) drawerFocusCol = newRow.length - 1;
+    updateDrawerFocusWeb();
+  } else if (dir === 3) { // Left
+    const curRow = rows[drawerFocusRow];
+    if (curRow.length > 1) {
+      drawerFocusCol--;
+      if (drawerFocusCol < 0) drawerFocusCol = curRow.length - 1;
+      updateDrawerFocusWeb();
+    } else if (curRow.length === 1) {
+      const c = curRow[0];
+      if (c.tagName === 'SELECT' && c.options.length > 1) {
+        c.selectedIndex = (c.selectedIndex - 1 + c.options.length) % c.options.length;
+        c.dispatchEvent(new Event('change'));
+        showToast('Selected: ' + c.options[c.selectedIndex].text);
+        updateDrawerFocusWeb();
+      } else if (c.type === 'checkbox') {
+        c.checked = !c.checked;
+        c.dispatchEvent(new Event('change'));
+        showToast((c.checked ? '✔ ' : '✖ ') + (c.closest('label')?.textContent.trim() || ''));
+      }
+    }
+  } else if (dir === 4) { // Right
+    const curRow = rows[drawerFocusRow];
+    if (curRow.length > 1) {
+      drawerFocusCol++;
+      if (drawerFocusCol >= curRow.length) drawerFocusCol = 0;
+      updateDrawerFocusWeb();
+    } else if (curRow.length === 1) {
+      const c = curRow[0];
+      if (c.tagName === 'SELECT' && c.options.length > 1) {
+        c.selectedIndex = (c.selectedIndex + 1) % c.options.length;
+        c.dispatchEvent(new Event('change'));
+        showToast('Selected: ' + c.options[c.selectedIndex].text);
+        updateDrawerFocusWeb();
+      } else if (c.type === 'checkbox') {
+        c.checked = !c.checked;
+        c.dispatchEvent(new Event('change'));
+        showToast((c.checked ? '✔ ' : '✖ ') + (c.closest('label')?.textContent.trim() || ''));
+      }
+    }
+  }
+}
+
+function activateCurrentDrawerControlWeb() {
+  const rows = getDrawerNavRows();
+  if (!rows.length) return;
+
+  if (drawerFocusRow < 0) drawerFocusRow = 0;
+  if (drawerFocusRow >= rows.length) drawerFocusRow = rows.length - 1;
+
+  const curRow = rows[drawerFocusRow];
+  if (drawerFocusCol < 0) drawerFocusCol = 0;
+  if (drawerFocusCol >= curRow.length) drawerFocusCol = curRow.length - 1;
+
+  const target = curRow[drawerFocusCol];
+  if (!target) return;
+
+  if (target.tagName === 'SELECT' && target.options.length > 1) {
+    target.selectedIndex = (target.selectedIndex + 1) % target.options.length;
+    target.dispatchEvent(new Event('change'));
+    showToast('Selected: ' + target.options[target.selectedIndex].text);
+    updateDrawerFocusWeb();
+    return;
+  }
+
+  if (target.type === 'checkbox') {
+    target.checked = !target.checked;
+    target.dispatchEvent(new Event('change'));
+    showToast((target.checked ? '✔ ' : '✖ ') + (target.closest('label')?.textContent.trim() || ''));
+    return;
+  }
+
+  if (typeof target.click === 'function') {
+    target.click();
+  }
+}
+
 function updateWebHandheldLegend() {
   const bar = document.getElementById('handheld-legend-bar');
   if (!bar) return;
@@ -1009,10 +1208,9 @@ function updateWebHandheldLegend() {
   const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
   if (isDrawerOpen) {
     bar.innerHTML = `
-      <div class="controller-legend-item"><span class="gamepad-badge btn-a">A</span> <span class="legend-text">Install</span></div>
-      <div class="controller-legend-item"><span class="gamepad-badge btn-x">X</span> <span class="legend-text">Launch Game</span></div>
-      <div class="controller-legend-item"><span class="gamepad-badge btn-y">Y</span> <span class="legend-text">Restore</span></div>
-      <div class="controller-legend-item"><span class="gamepad-badge btn-b">B</span> <span class="legend-text">Close</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-special">D-Pad / Stick</span> <span class="legend-text">Navigate / Change</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-a">A</span> <span class="legend-text">Select / Toggle</span></div>
+      <div class="controller-legend-item"><span class="gamepad-badge btn-b">B</span> <span class="legend-text">Close Drawer</span></div>
       <div class="controller-legend-item"><span class="gamepad-badge btn-shoulder">LB/RB</span> <span class="legend-text">Drawer Tabs</span></div>
       <div class="controller-legend-item"><span class="gamepad-badge btn-special">View</span> <span class="legend-text">Exit Handheld (F11)</span></div>
     `;
@@ -1159,12 +1357,10 @@ function setupGamepadNavigation() {
         }
       }
 
-      // Y: Toggle Grid / List (in library) or Restore (in drawer)
+      // Y: Toggle Grid / List (in library)
       if (isJustPressed(3, btnY)) {
         const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
-        if (isDrawerOpen) {
-          if (drawerBtnUninstall) drawerBtnUninstall.click();
-        } else {
+        if (!isDrawerOpen) {
           if (currentView === 'grid') {
             const btnL = document.getElementById('btn-view-list');
             if (btnL) btnL.click();
@@ -1175,12 +1371,10 @@ function setupGamepadNavigation() {
         }
       }
 
-      // X: Launch Game (in drawer or games) / Search
+      // X: Launch Game (in games)
       if (isJustPressed(2, btnX)) {
         const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
-        if (isDrawerOpen) {
-          if (drawerBtnLaunch) drawerBtnLaunch.click();
-        } else if (currentActiveTab === 'games') {
+        if (!isDrawerOpen && currentActiveTab === 'games') {
           if (filteredGames && filteredGames[gamepadNavIndex]) {
             const g = filteredGames[gamepadNavIndex];
             if (g.installed) {
@@ -1201,11 +1395,11 @@ function setupGamepadNavigation() {
         cycleFiltersWeb(1);
       }
 
-      // A: Install (in drawer) / Compile (in core tab) / Open Drawer (in games)
+      // A: Activate focused control (in drawer) / Compile (in core tab) / Open Drawer (in games)
       if (isJustPressed(0, btnA)) {
         const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
         if (isDrawerOpen) {
-          if (drawerBtnInstall) drawerBtnInstall.click();
+          activateCurrentDrawerControlWeb();
         } else if (currentActiveTab === 'core') {
           const btnBuild = document.getElementById('btn-start-build');
           if (btnBuild && !btnBuild.disabled) btnBuild.click();
@@ -1271,12 +1465,7 @@ function setupGamepadNavigation() {
 function handleWebDirectionalNav(dir) {
   const isDrawerOpen = gameDrawer && gameDrawer.classList.contains('open');
   if (isDrawerOpen) {
-    const tabBtns = document.querySelectorAll('.drawer-tab-btn');
-    if (tabBtns.length > 0) {
-      let activeIdx = Array.from(tabBtns).findIndex(b => b.classList.contains('active'));
-      if (dir === 3 && activeIdx > 0) tabBtns[activeIdx - 1].click();
-      if (dir === 4 && activeIdx < tabBtns.length - 1) tabBtns[activeIdx + 1].click();
-    }
+    handleDrawerDirectionalNavWeb(dir);
     return;
   }
 

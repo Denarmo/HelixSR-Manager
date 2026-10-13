@@ -1932,6 +1932,7 @@ def run_standalone_gui(smoke_test_ms=0):
                 highlightthickness=1,
                 height=44,
             )
+            self.legend_bar.pack_propagate(False)
             self.legend_stack = tk.Frame(self.legend_bar, bg=self.legend_bar.cget("bg"))
             self.legend_stack.pack(expand=True, pady=8)
 
@@ -2345,8 +2346,8 @@ def run_standalone_gui(smoke_test_ms=0):
                 fg=self.c_text,
                 insertbackground=self.c_emerald,
                 bd=0,
-                width=24,
-                font=("Sans", 10),
+                width=14,
+                font=("Sans", 9),
             )
             self.entry_search.pack(side="left")
 
@@ -2357,7 +2358,7 @@ def run_standalone_gui(smoke_test_ms=0):
                 fg=self.c_dim,
                 bd=0,
                 padx=4,
-                 pady=0,
+                pady=0,
                 cursor="hand2",
                 font=("Sans", 9, "bold"),
                 command=self._clear_search,
@@ -2371,11 +2372,11 @@ def run_standalone_gui(smoke_test_ms=0):
                 textvariable=self.var_cmb_launcher,
                 values=["All Launchers", "Steam", "Custom"],
                 state="readonly",
-                width=13,
+                width=10,
                 style="Helix.TCombobox",
                 font=("Sans", 9),
             )
-            self.cmb_launcher.pack(side="left", padx=(0, 8))
+            self.cmb_launcher.pack(side="left", padx=(0, 5))
             self.cmb_launcher.bind("<<ComboboxSelected>>", lambda _e: self._apply_game_filters())
 
             self.var_cmb_status = tk.StringVar(value="All Status")
@@ -2384,11 +2385,11 @@ def run_standalone_gui(smoke_test_ms=0):
                 textvariable=self.var_cmb_status,
                 values=["All Status", "HelixSR Active", "Not Installed"],
                 state="readonly",
-                width=14,
+                width=10,
                 style="Helix.TCombobox",
                 font=("Sans", 9),
             )
-            self.cmb_status.pack(side="left", padx=(0, 8))
+            self.cmb_status.pack(side="left", padx=(0, 5))
             self.cmb_status.bind("<<ComboboxSelected>>", lambda _e: self._apply_game_filters())
 
             self.var_cmb_sort = tk.StringVar(value="Name (A-Z)")
@@ -2397,7 +2398,7 @@ def run_standalone_gui(smoke_test_ms=0):
                 textvariable=self.var_cmb_sort,
                 values=["Name (A-Z)", "Name (Z-A)", "Installed First"],
                 state="readonly",
-                width=13,
+                width=9,
                 style="Helix.TCombobox",
                 font=("Sans", 9),
             )
@@ -2458,15 +2459,17 @@ def run_standalone_gui(smoke_test_ms=0):
 
             title_badge_row = tk.Frame(banner_stack, bg=self.c_hero_bg)
             title_badge_row.pack(fill="x", anchor="w")
-            tk.Label(
+            self.lbl_hero_title = tk.Label(
                 title_badge_row,
                 text="Neural Super Resolution Library",
                 bg=self.c_hero_bg,
                 fg=self.c_text,
                 font=("Sans", 13, "bold"),
-            ).pack(side="left")
+                anchor="w",
+            )
+            self.lbl_hero_title.pack(side="left")
 
-            drop_badge = tk.Frame(
+            self.hero_drop_badge = tk.Frame(
                 title_badge_row,
                 bg=self.c_card,
                 highlightbackground=self.c_border,
@@ -2474,16 +2477,16 @@ def run_standalone_gui(smoke_test_ms=0):
                 padx=8,
                 pady=2,
             )
-            drop_badge.pack(side="left", padx=(10, 0))
+            self.hero_drop_badge.pack(side="left", padx=(10, 0))
             tk.Label(
-                drop_badge,
+                self.hero_drop_badge,
                 text="📥 Drag & Drop Folders Supported",
                 bg=self.c_card,
                 fg=self.c_muted,
                 font=("Sans", 8, "bold"),
             ).pack()
 
-            tk.Label(
+            self.lbl_hero_subtitle = tk.Label(
                 banner_stack,
                 text="Swap native FSR 3.1 DLLs or inject OptiScaler hooks with DLSS Model E compute shaders & automatic REFramework nightly support.",
                 bg=self.c_hero_bg,
@@ -2491,7 +2494,9 @@ def run_standalone_gui(smoke_test_ms=0):
                 font=("Sans", 9),
                 anchor="w",
                 justify="left",
-            ).pack(fill="x", pady=(4, 0))
+                wraplength=520,
+            )
+            self.lbl_hero_subtitle.pack(fill="x", pady=(4, 0))
 
             # 2. Interactive Quick-Filter Pill Bar (Matches 6 pills in MainWindow.cs)
             filter_pill_bar = tk.Frame(self.games_left_area, bg=self.c_main_shell, padx=20)
@@ -3832,7 +3837,7 @@ def run_standalone_gui(smoke_test_ms=0):
 
         def _open_drawer(self, game, idx=0):
             manifests = get_steam_manifests()
-            fresh = scan_game(game["folder"], game.get("name"), manifests)
+            fresh = scan_game(game["folder"], game.get("name"), manifests) if os.path.isdir(game.get("folder", "")) else dict(game)
             self.selected_game = fresh
             self.focused_index = idx
 
@@ -3869,7 +3874,14 @@ def run_standalone_gui(smoke_test_ms=0):
             self._populate_drawer_method_options(fresh)
             self._refresh_drawer_logs()
 
-            self.drawer_frame.pack(side="right", fill="y")
+            if hasattr(self, "hero_drop_badge"):
+                self.hero_drop_badge.pack_forget()
+            if hasattr(self, "lbl_hero_title"):
+                self.lbl_hero_title.configure(text="Neural Super Resolution")
+            if hasattr(self, "lbl_hero_subtitle"):
+                self.lbl_hero_subtitle.configure(text="Swap native FSR 3.1 DLLs or inject OptiScaler hooks with DLSS Model E.")
+
+            self.drawer_frame.pack(side="right", fill="y", before=self.games_left_area)
             self.drawer_frame.pack_propagate(False)
             self._update_handheld_legend()
             self._render_games_grid_only()
@@ -3877,6 +3889,14 @@ def run_standalone_gui(smoke_test_ms=0):
         def _close_drawer(self):
             self.selected_game = None
             self.drawer_frame.pack_forget()
+            if hasattr(self, "lbl_hero_title"):
+                self.lbl_hero_title.configure(text="Neural Super Resolution Library")
+            if hasattr(self, "hero_drop_badge"):
+                self.hero_drop_badge.pack(side="left", padx=(10, 0))
+            if hasattr(self, "lbl_hero_subtitle"):
+                self.lbl_hero_subtitle.configure(
+                    text="Swap native FSR 3.1 DLLs or inject OptiScaler hooks with DLSS Model E compute shaders & automatic REFramework nightly support."
+                )
             self._update_handheld_legend()
             self._render_games_grid_only()
 

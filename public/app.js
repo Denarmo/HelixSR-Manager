@@ -5,7 +5,7 @@ let currentView = 'grid';
 let activeLogs = { helixsrLog: '', optiscalerLog: '' };
 let currentLogType = 'helix';
 // Filled from /api/core/status; defaults match the bundled release
-let coreInfo = { version: '1.8.1', appVersion: '1.1.0', dlssLoaderAvailable: true };
+let coreInfo = { version: '1.8.1', appVersion: '1.1.1', dlssLoaderAvailable: true };
 
 function updateVersionTag() {
   const tag = document.getElementById('app-version-tag');

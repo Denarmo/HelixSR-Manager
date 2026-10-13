@@ -1,6 +1,6 @@
 # ⚡ HelixSR Manager
 
-[![Release](https://img.shields.io/badge/Release-v1.1.0-F1C40F?style=for-the-badge)](https://github.com/Denarmo/HelixSR-Manager/releases)
+[![Release](https://img.shields.io/badge/Release-v1.1.1-F1C40F?style=for-the-badge)](https://github.com/Denarmo/HelixSR-Manager/releases)
 [![HelixSR Core](https://img.shields.io/badge/HelixSR_Core-v1.8.1-39D5FF?style=for-the-badge)](https://github.com/lonewolf0622/HelixSR)
 [![Platform](https://img.shields.io/badge/Platform-Windows_10%2F11_%7C_Linux_%26_SteamOS-10B981?style=for-the-badge)](#%EF%B8%8F-installation--quick-start)
 [![Dependencies](https://img.shields.io/badge/Dependencies-Zero_(100%25_Standalone)-8B5CF6?style=for-the-badge)](#%EF%B8%8F-installation--quick-start)

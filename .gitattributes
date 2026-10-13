@@ -1,2 +1,10 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+*.sh text eol=lf
+*.desktop text eol=lf
+src/linux/*.py text eol=lf
+helixsr_core/**/*.py text eol=lf
+helixsr_core/**/launch_synth binary
+*.dll binary
+*.exe binary
+*.ico binary
+*.png binary
+*.jpg binary

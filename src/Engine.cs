@@ -14,7 +14,7 @@ namespace HelixSRSwapper
     public class Engine
     {
         /// <summary>HelixSR Manager release version (shown in the sidebar logo and window title).</summary>
-        public const string AppVersion = "1.1.0";
+        public const string AppVersion = "1.1.1";
         /// <summary>Bundled upstream HelixSR core version (helixsr_core/HelixSR-x.y.z).</summary>
         public const string CoreVersion = "1.8.1";
 

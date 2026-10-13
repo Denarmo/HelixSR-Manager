@@ -27,7 +27,7 @@ PUBLIC_DIR = os.path.join(APP_DIR, "public")
 if not os.path.isdir(PUBLIC_DIR):
     PUBLIC_DIR = os.path.abspath(os.path.join(APP_DIR, "..", "..", "public"))
 
-APP_VERSION = "1.1.0"   # HelixSR Manager release
+APP_VERSION = "1.1.1"   # HelixSR Manager release
 CORE_VERSION = "1.8.1"  # bundled upstream HelixSR core (helixsr_core/HelixSR-x.y.z)
 
 CORE_DIR = os.path.join(APP_DIR, "helixsr_core", f"HelixSR-{CORE_VERSION}")
@@ -1386,6 +1386,77 @@ def detect_handheld_environment():
     return info
 
 
+def get_clean_desktop_env():
+    env = dict(os.environ)
+    if os.name == "nt":
+        return env
+    env.pop("LD_PRELOAD", None)
+    if "SYSTEM_LD_LIBRARY_PATH" in env:
+        env["LD_LIBRARY_PATH"] = env["SYSTEM_LD_LIBRARY_PATH"]
+    elif "LD_LIBRARY_PATH" in env:
+        parts = [
+            p for p in env["LD_LIBRARY_PATH"].split(":")
+            if p and not any(k in p.lower() for k in ("steam", "pressure-vessel", "sniper", "soldier", "scout"))
+        ]
+        if parts:
+            env["LD_LIBRARY_PATH"] = ":".join(parts)
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+    base_path = env.get("SYSTEM_PATH") or env.get("PATH", "")
+    extra_paths = [
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        os.path.expanduser("~/.local/bin"),
+        "/var/lib/flatpak/exports/bin",
+        os.path.expanduser("~/.local/share/flatpak/exports/bin"),
+    ]
+    path_parts = [p for p in base_path.split(":") if p]
+    for ep in extra_paths:
+        if ep not in path_parts:
+            path_parts.append(ep)
+    env["PATH"] = ":".join(path_parts)
+    return env
+
+
+def ensure_linux_environment():
+    if os.name == "nt":
+        return
+    try:
+        data_dir = get_data_dir()
+        os.makedirs(data_dir, exist_ok=True)
+        with open(os.path.join(data_dir, "app_dir.txt"), "w", encoding="utf-8") as f:
+            f.write(APP_DIR + "\n")
+    except Exception:
+        pass
+
+    lf_targets = [
+        os.path.join(APP_DIR, "HelixSR-Manager.sh"),
+        os.path.join(APP_DIR, "HelixSR-Manager.desktop"),
+        os.path.join(CORE_DIR, "helixsr-setup.sh"),
+        os.path.join(CORE_DIR, "helixsr-uninstall.sh"),
+    ]
+    for p in lf_targets:
+        if os.path.isfile(p):
+            try:
+                raw = open(p, "rb").read()
+                if b"\r\n" in raw:
+                    open(p, "wb").write(raw.replace(b"\r\n", b"\n"))
+            except Exception:
+                pass
+
+    exec_targets = lf_targets + [
+        os.path.join(APP_DIR, "helixsr_swapper_linux.py"),
+        os.path.join(CORE_DIR, "setup", "lib", "model", "launch_synth"),
+    ]
+    for p in exec_targets:
+        if os.path.isfile(p):
+            try:
+                os.chmod(p, 0o755)
+            except Exception:
+                pass
+
+
 def open_folder_native(path_str):
     if not path_str or not os.path.exists(path_str):
         return {"success": False, "error": "Folder does not exist"}
@@ -1393,7 +1464,7 @@ def open_folder_native(path_str):
         if os.name == "nt":
             subprocess.Popen(["explorer.exe", os.path.normpath(path_str)])
         else:
-            subprocess.Popen(["xdg-open", path_str], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["xdg-open", path_str], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=get_clean_desktop_env())
         return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -1408,7 +1479,7 @@ def launch_game_native(game_folder):
             if os.name == "nt":
                 os.startfile(url)
             else:
-                subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=get_clean_desktop_env())
             return {"success": True, "message": f"Launching {game['name']} via Steam..."}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -1503,10 +1574,13 @@ def start_network_build(dlss_path="", wave64=False):
                     cmd += ["-Dlss", dlss_path]
             else:
                 sh_script = os.path.join(CORE_DIR, "helixsr-setup.sh")
-                try:
-                    os.chmod(sh_script, 0o755)
-                except Exception:
-                    pass
+                synth_bin = os.path.join(CORE_DIR, "setup", "lib", "model", "launch_synth")
+                for p in (sh_script, synth_bin):
+                    if os.path.isfile(p):
+                        try:
+                            os.chmod(p, 0o755)
+                        except Exception:
+                            pass
                 cmd = ["bash", sh_script, "--yes", "--rebuild"]
                 if dlss_path and os.path.isfile(dlss_path):
                     cmd += ["--dlss", dlss_path]
@@ -1586,6 +1660,7 @@ class SwapperRequestHandler(BaseHTTPRequestHandler):
             cands = [{"game": g["name"], "path": g["foundNvngxDlssPath"]} for g in games if g.get("foundNvngxDlssPath")]
             st["dlssCandidates"] = cands
             st["handheld"] = detect_handheld_environment()
+            st["isBuilding"] = IS_BUILDING
             return self._send_json(200, st)
 
         if pathname == "/api/system/info":
@@ -1701,6 +1776,11 @@ class SwapperRequestHandler(BaseHTTPRequestHandler):
         body = self._read_json()
 
         try:
+            if pathname == "/api/shutdown":
+                self._send_json(200, {"success": True})
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return
+
             if pathname == "/api/scan":
                 games = scan_all_games()
                 return self._send_json(200, {"success": True, "count": len(games), "games": games})
@@ -1784,26 +1864,145 @@ class SwapperRequestHandler(BaseHTTPRequestHandler):
         return self._send_json(404, {"error": "Not found"})
 
 
-def open_desktop_window(url):
-    # Try chromeless desktop app mode first (Chrome/Chromium/Brave/Edge on Linux/SteamOS)
-    browsers = [
-        "chromium", "chromium-browser", "google-chrome", "brave-browser", "microsoft-edge",
+def is_flatpak_app_installed(app_id):
+    home = os.path.expanduser("~")
+    candidates = [
+        f"/var/lib/flatpak/exports/bin/{app_id}",
+        os.path.join(home, ".local", "share", "flatpak", "exports", "bin", app_id),
+        f"/var/lib/flatpak/app/{app_id}",
+        os.path.join(home, ".local", "share", "flatpak", "app", app_id),
     ]
-    for b in browsers:
-        exe = shutil.which(b)
-        if exe:
-            try:
-                subprocess.Popen([exe, f"--app={url}", "--window-size=1320,850"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return
-            except Exception:
-                pass
+    return any(os.path.exists(c) for c in candidates)
+
+
+def _try_spawn_browser(cmd, env, wait_sec=0.35):
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+        deadline = time.monotonic() + wait_sec
+        while time.monotonic() < deadline:
+            rc = proc.poll()
+            if rc is not None:
+                return rc == 0
+            time.sleep(0.05)
+        return True
+    except Exception:
+        return False
+
+
+def open_desktop_window(url):
+    env = get_clean_desktop_env()
+    search_path = env.get("PATH")
+
+    # 1. Native Chromium-family browsers in chromeless desktop app mode
+    native_chromium = [
+        "chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
+        "brave-browser", "brave", "microsoft-edge", "microsoft-edge-stable",
+        "vivaldi", "vivaldi-stable",
+    ]
+    for b in native_chromium:
+        exe = shutil.which(b, path=search_path)
+        if exe and _try_spawn_browser([exe, f"--app={url}", "--window-size=1320,850"], env):
+            return
+
+    # 2. Flatpak Chromium-family browsers (standard on SteamOS / Bazzite) in chromeless app mode
+    flatpak_exe = shutil.which("flatpak", path=search_path)
+    flatpak_chromium = [
+        "com.google.Chrome",
+        "org.chromium.Chromium",
+        "com.brave.Browser",
+        "com.microsoft.Edge",
+        "io.github.ungoogled_software.ungoogled_chromium",
+        "com.vivaldi.Vivaldi",
+    ]
+    if flatpak_exe:
+        for app_id in flatpak_chromium:
+            if is_flatpak_app_installed(app_id):
+                if _try_spawn_browser([flatpak_exe, "run", app_id, f"--app={url}", "--window-size=1320,850"], env):
+                    return
+
+    in_gamescope = (
+        env.get("XDG_CURRENT_DESKTOP", "").lower() == "gamescope"
+        or env.get("SteamGamepadUI") == "1"
+    )
+
+    def try_firefox_fallbacks():
+        if flatpak_exe:
+            for ff_id in ("org.mozilla.firefox", "app.zen_browser.zen", "io.gitlab.librewolf-community", "net.waterfox.waterfox"):
+                if is_flatpak_app_installed(ff_id):
+                    if _try_spawn_browser([flatpak_exe, "run", ff_id, url], env):
+                        return True
+        ff_exe = shutil.which("firefox", path=search_path)
+        if ff_exe and _try_spawn_browser([ff_exe, url], env):
+            return True
+        return False
+
+    def try_xdg_fallbacks():
+        for opener in (
+            ["xdg-open", url],
+            ["kioclient5", "exec", url],
+            ["kioclient", "exec", url],
+            ["kde-open5", url],
+            ["gio", "open", url],
+        ):
+            exe = shutil.which(opener[0], path=search_path)
+            if exe and _try_spawn_browser([exe] + opener[1:], env, wait_sec=0.6):
+                return True
+        return False
+
+    # 3. In SteamOS Gaming Mode (gamescope), xdg-open often lacks a portal daemon, so try direct browser first
+    if in_gamescope:
+        if try_firefox_fallbacks() or try_xdg_fallbacks():
+            return
+    else:
+        if try_xdg_fallbacks() or try_firefox_fallbacks():
+            return
+
     try:
         webbrowser.open(url)
     except Exception:
         pass
 
 
+def _is_port_in_use(port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _probe_existing_instance(port):
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/core/status")
+        with urllib.request.urlopen(req, timeout=0.8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if isinstance(data, dict) and "appVersion" in data:
+                return data
+    except Exception:
+        pass
+    return None
+
+
+def _shutdown_existing_instance(port):
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/shutdown",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=0.8) as _resp:
+            pass
+        deadline = time.monotonic() + 1.5
+        while time.monotonic() < deadline:
+            if not _is_port_in_use(port):
+                return True
+            time.sleep(0.05)
+    except Exception:
+        pass
+    return not _is_port_in_use(port)
+
+
 def main():
+    ensure_linux_environment()
+
     if "--list" in sys.argv:
         for g in scan_all_games():
             status = f"ACTIVE ({g['routeDisplay']})" if g["installed"] else f"Not Installed ({g['routeDisplay']})"
@@ -1811,12 +2010,28 @@ def main():
         return
 
     port = 4280
-    for p in range(4280, 4310):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(("127.0.0.1", p)) != 0:
-                port = p
-                break
+    if _is_port_in_use(port):
+        existing = _probe_existing_instance(port)
+        if existing is not None:
+            if existing.get("isBuilding"):
+                url = f"http://127.0.0.1:{port}"
+                print(f"[HelixSR Manager] Reconnecting to active instance on {url}")
+                if "--no-browser" not in sys.argv:
+                    open_desktop_window(url)
+                return
+            if not _shutdown_existing_instance(port):
+                url = f"http://127.0.0.1:{port}"
+                print(f"[HelixSR Manager] Opening existing instance on {url}")
+                if "--no-browser" not in sys.argv:
+                    open_desktop_window(url)
+                return
 
+    for p in range(4280, 4310):
+        if not _is_port_in_use(p):
+            port = p
+            break
+
+    ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer(("127.0.0.1", port), SwapperRequestHandler)
     url = f"http://127.0.0.1:{port}"
     print(f"[HelixSR Manager] Running on {url} (Press Ctrl+C to quit)")

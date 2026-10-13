@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-HelixSR Manager — Standalone Linux & SteamOS Application Backend & Desktop Launcher
-Zero external dependencies (Python 3 standard library only).
+HelixSR Manager — Standalone Linux & SteamOS Native Desktop Application
 """
 
 import base64
@@ -11,16 +10,13 @@ import os
 import platform
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import threading
 import time
 import urllib.parse
 import urllib.request
-import webbrowser
 import zipfile
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PUBLIC_DIR = os.path.join(APP_DIR, "public")
@@ -1391,12 +1387,14 @@ def get_clean_desktop_env():
     if os.name == "nt":
         return env
     env.pop("LD_PRELOAD", None)
+    env.pop("TCL_LIBRARY", None)
+    env.pop("TK_LIBRARY", None)
     if "SYSTEM_LD_LIBRARY_PATH" in env:
         env["LD_LIBRARY_PATH"] = env["SYSTEM_LD_LIBRARY_PATH"]
     elif "LD_LIBRARY_PATH" in env:
         parts = [
             p for p in env["LD_LIBRARY_PATH"].split(":")
-            if p and not any(k in p.lower() for k in ("steam", "pressure-vessel", "sniper", "soldier", "scout"))
+            if p and not any(k in p.lower() for k in ("steam", "pressure-vessel", "sniper", "soldier", "scout", "helixsr/python"))
         ]
         if parts:
             env["LD_LIBRARY_PATH"] = ":".join(parts)
@@ -1531,7 +1529,6 @@ def sync_helixsr_to_installed_games():
                 for target in g.get("fsrTargets") or []:
                     tdir = os.path.dirname(target)
                     marker = os.path.join(tdir, MARKER_FILE)
-                    # only targets HelixSR owns (game's file kept as *.original.dll or our install record)
                     if not os.path.isfile(os.path.splitext(target)[0] + ".original.dll") and not os.path.isfile(marker):
                         continue
                     any_target = True
@@ -1551,7 +1548,6 @@ def sync_helixsr_to_installed_games():
             if updated:
                 count += 1
         except Exception:
-            # game running / file locked: leave this game as it is, the user can reinstall it from the drawer
             pass
     return count
 
@@ -1565,13 +1561,12 @@ def start_network_build(dlss_path="", wave64=False):
         global IS_BUILDING
         IS_BUILDING = True
         try:
-            # HelixSR 1.8+: both wave sizes are always built (wave64 flag kept only for API compatibility),
-            # the network is embedded into amd_fidelityfx_dx12.dll, and setup no longer has a build-only switch.
             if os.name == "nt":
                 ps1 = os.path.join(CORE_DIR, "helixsr-setup.ps1")
                 cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", ps1, "-Yes", "-Rebuild"]
                 if dlss_path and os.path.isfile(dlss_path):
                     cmd += ["-Dlss", dlss_path]
+                env = dict(os.environ)
             else:
                 sh_script = os.path.join(CORE_DIR, "helixsr-setup.sh")
                 synth_bin = os.path.join(CORE_DIR, "setup", "lib", "model", "launch_synth")
@@ -1584,8 +1579,8 @@ def start_network_build(dlss_path="", wave64=False):
                 cmd = ["bash", sh_script, "--yes", "--rebuild"]
                 if dlss_path and os.path.isfile(dlss_path):
                     cmd += ["--dlss", dlss_path]
+                env = get_clean_desktop_env()
 
-            env = dict(os.environ)
             env["PYTHONUNBUFFERED"] = "1"
             broadcast_build_log("Starting HelixSR Network Compiler: " + " ".join(cmd))
             proc = subprocess.Popen(
@@ -1598,8 +1593,6 @@ def start_network_build(dlss_path="", wave64=False):
                 bufsize=1,
                 env=env,
             )
-            # Upstream setup continues with its own interactive game installer after the build; the
-            # manager handles installs itself, so that part of the output is hidden.
             suppress = False
             for line in proc.stdout:
                 if suppress:
@@ -1626,378 +1619,1605 @@ def start_network_build(dlss_path="", wave64=False):
     return {"success": True}
 
 
-class SwapperRequestHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        pass
-
-    def _send_json(self, status, payload):
-        body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _read_json(self):
-        length = int(self.headers.get("Content-Length", "0"))
-        if length <= 0:
-            return {}
-        raw = self.rfile.read(length).decode("utf-8")
-        return json.loads(raw) if raw else {}
-
-    def do_GET(self):
-        parsed = urllib.parse.urlparse(self.path)
-        pathname = parsed.path
-        qs = urllib.parse.parse_qs(parsed.query)
-
-        if pathname == "/api/games":
-            return self._send_json(200, {"games": scan_all_games()})
-
-        if pathname == "/api/core/status":
-            st = get_core_status()
-            games = scan_all_games()
-            cands = [{"game": g["name"], "path": g["foundNvngxDlssPath"]} for g in games if g.get("foundNvngxDlssPath")]
-            st["dlssCandidates"] = cands
-            st["handheld"] = detect_handheld_environment()
-            st["isBuilding"] = IS_BUILDING
-            return self._send_json(200, st)
-
-        if pathname == "/api/system/info":
-            return self._send_json(200, {
-                "platform": platform.system(),
-                "release": platform.release(),
-                "gpus": get_gpu_info(),
-                "steamLibraries": get_steam_libraries(),
-                "customFolders": load_config().get("customFolders", []),
-                "handheld": detect_handheld_environment(),
-            })
-
-        if pathname == "/api/games/logs":
-            folder = qs.get("folder", [""])[0]
-            manifests = get_steam_manifests()
-            g = scan_game(folder, None, manifests) if folder else {}
-            t = g.get("exeFolder") or folder
-            hlog = ""
-            olog = ""
-            ini = ""
-            for p in (os.path.join(t, HELIXSR_FOLDER, "helixsr.log"), os.path.join(t, "helixsr.log")):
-                if os.path.isfile(p):
+def get_game_logs_and_ini(folder):
+    manifests = get_steam_manifests()
+    g = scan_game(folder, None, manifests) if folder else {}
+    t = g.get("exeFolder") or folder
+    hlog = ""
+    olog = ""
+    ini = ""
+    if t and os.path.isdir(t):
+        for p in (os.path.join(t, HELIXSR_FOLDER, "helixsr.log"), os.path.join(t, "helixsr.log")):
+            if os.path.isfile(p):
+                try:
                     with open(p, "r", encoding="utf-8", errors="ignore") as f:
                         hlog = f.read()
-                    break
-            op = os.path.join(t, "OptiScaler.log")
-            if os.path.isfile(op):
+                except Exception:
+                    pass
+                break
+        op = os.path.join(t, "OptiScaler.log")
+        if os.path.isfile(op):
+            try:
                 with open(op, "r", encoding="utf-8", errors="ignore") as f:
                     olog = f.read()
-            ip = os.path.join(t, "OptiScaler.ini")
-            if os.path.isfile(ip):
+            except Exception:
+                pass
+        ip = os.path.join(t, "OptiScaler.ini")
+        if os.path.isfile(ip):
+            try:
                 with open(ip, "r", encoding="utf-8", errors="ignore") as f:
                     ini = f.read()
-            return self._send_json(200, {"helixsrLog": hlog, "optiscalerLog": olog, "optiscalerIni": ini})
-
-        if pathname == "/api/steam-image":
-            b64 = qs.get("path", [""])[0]
-            try:
-                img_path = base64.b64decode(b64).decode("utf-8")
-                if os.path.isfile(img_path):
-                    with open(img_path, "rb") as f:
-                        data = f.read()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "image/jpeg")
-                    self.send_header("Content-Length", str(len(data)))
-                    self.end_headers()
-                    self.wfile.write(data)
-                    return
             except Exception:
                 pass
-            self.send_response(404)
-            self.end_headers()
-            return
+    return {"helixsrLog": hlog, "optiscalerLog": olog, "optiscalerIni": ini, "exeFolder": t}
 
-        if pathname == "/api/core/build-events":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
-            self.end_headers()
-            q = []
+
+# ============================================================================
+# Standalone Native Desktop GUI (Tkinter / Tcl-Tk 9.0)
+# ============================================================================
+
+def _prepare_tk_env():
+    for ver in ("9.0", "8.6"):
+        tcl_dir = os.path.join(sys.prefix, "lib", f"tcl{ver}")
+        tk_dir = os.path.join(sys.prefix, "lib", f"tk{ver}")
+        if os.path.isdir(tcl_dir) and os.path.isdir(tk_dir):
+            os.environ.setdefault("TCL_LIBRARY", tcl_dir)
+            os.environ.setdefault("TK_LIBRARY", tk_dir)
+            break
+
+
+def _acquire_single_instance_lock():
+    """Returns lock file object if primary instance, or None if another instance is already running."""
+    if os.name == "nt":
+        return True
+    try:
+        import fcntl
+        data_dir = get_data_dir()
+        os.makedirs(data_dir, exist_ok=True)
+        lock_path = os.path.join(data_dir, "instance.lock")
+        wakeup_path = os.path.join(data_dir, "wakeup.flag")
+        fp = open(lock_path, "w")
+        try:
+            fcntl.flock(fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fp.write(str(os.getpid()) + "\n")
+            fp.flush()
+            return fp
+        except (BlockingIOError, IOError):
+            try:
+                with open(wakeup_path, "w", encoding="utf-8") as wf:
+                    wf.write(str(time.time()))
+            except Exception:
+                pass
+            fp.close()
+            return None
+    except Exception:
+        return True
+
+
+def run_standalone_gui(smoke_test_ms=0):
+    _prepare_tk_env()
+    try:
+        import tkinter as tk
+        from tkinter import ttk, filedialog, messagebox
+    except ImportError:
+        if os.name != "nt" and os.environ.get("HELIXSR_SH_DELEGATED") != "1":
+            sh_path = os.path.join(APP_DIR, "HelixSR-Manager.sh")
+            if os.path.isfile(sh_path):
+                env = dict(os.environ)
+                env["HELIXSR_SH_DELEGATED"] = "1"
+                os.execvpe("bash", ["bash", sh_path] + sys.argv[1:], env)
+        raise
+
+    lock_handle = _acquire_single_instance_lock()
+    if lock_handle is None:
+        print("[HelixSR Manager] Another instance is already running; focusing existing window.")
+        return
+
+    class HelixSRStandaloneApp:
+        def __init__(self, root):
+            self.root = root
+            self.cfg = load_config()
+            self.is_light = bool(self.cfg.get("lightTheme", False))
+            self.all_games = []
+            self.filtered_games = []
+            self.selected_game = None
+            self.current_tab = "games"
+            self.quick_filter = "all"
+            self.launcher_filter = "All"
+            self.sort_mode = "Name (A-Z)"
+            self.is_grid_view = True
+            self.focused_index = -1
+            self.is_handheld_mode = False
+            self.build_log_queue = []
+            self.drawer_tab = "guide"
+            self.updating_drawer = False
+            self.toast_after_id = None
+
             with BUILD_LOCK:
-                BUILD_LISTENERS.append(q)
+                BUILD_LISTENERS.append(self.build_log_queue)
+
+            self.root.title(f"HelixSR Manager v{APP_VERSION} — Neural Upscaler & Game Manager")
+            sw = max(1024, self.root.winfo_screenwidth())
+            sh = max(680, self.root.winfo_screenheight())
+            win_w = min(1320, sw - 40)
+            win_h = min(840, sh - 60)
+            pos_x = max(0, (sw - win_w) // 2)
+            pos_y = max(0, (sh - win_h) // 2)
+            self.root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+            self.root.minsize(920, 600)
+
+            self._set_app_icon()
+            self._apply_palette()
+            self._build_layout()
+            self._bind_shortcuts()
+
+            handheld_info = detect_handheld_environment()
+            in_gamescope = (
+                os.environ.get("XDG_CURRENT_DESKTOP", "").lower() == "gamescope"
+                or os.environ.get("SteamGamepadUI") == "1"
+            )
+            if in_gamescope or "--handheld" in sys.argv:
+                self._toggle_handheld_mode(force_state=True)
+            elif handheld_info.get("isHandheld"):
+                self.legend_bar.pack(side="bottom", fill="x")
+
+            self.root.after(80, self._initial_load)
+            self.root.after(250, self._periodic_tick)
+            if smoke_test_ms > 0:
+                self.root.after(smoke_test_ms, self.root.destroy)
+
+        def _set_app_icon(self):
             try:
-                while True:
-                    while q:
-                        line = q.pop(0)
-                        self.wfile.write(f"data: {json.dumps({'log': line})}\n\n".encode("utf-8"))
-                        self.wfile.flush()
-                    if not IS_BUILDING and not q:
-                        break
-                    time.sleep(0.25)
+                icon = tk.PhotoImage(width=32, height=32)
+                icon.put("#f59e0b", to=(2, 2, 30, 30))
+                icon.put("#fbbf24", to=(4, 4, 28, 16))
+                bolt_pts = [
+                    (17, 5, 20, 8), (15, 8, 19, 11), (12, 11, 17, 14),
+                    (10, 14, 22, 17), (15, 17, 20, 20), (14, 20, 18, 23), (12, 23, 16, 27),
+                ]
+                for x1, y1, x2, y2 in bolt_pts:
+                    icon.put("#0b0e14", to=(x1, y1, x2, y2))
+                self._icon_ref = icon
+                self.root.iconphoto(True, icon)
             except Exception:
                 pass
-            finally:
-                with BUILD_LOCK:
-                    if q in BUILD_LISTENERS:
-                        BUILD_LISTENERS.remove(q)
-            return
 
-        # Serve Static Public UI
-        rel = "index.html" if pathname in ("/", "") else pathname.lstrip("/")
-        file_path = os.path.abspath(os.path.join(PUBLIC_DIR, rel))
-        if not file_path.startswith(os.path.abspath(PUBLIC_DIR)) or not os.path.isfile(file_path):
-            file_path = os.path.join(PUBLIC_DIR, "index.html")
+        def _apply_palette(self):
+            if self.is_light:
+                self.c_bg = "#eef1f5"
+                self.c_sidebar = "#ffffff"
+                self.c_card = "#f8fafc"
+                self.c_card_hover = "#e2e8f0"
+                self.c_surface2 = "#e2e8f0"
+                self.c_border = "#cbd5e1"
+                self.c_emerald = "#059669"
+                self.c_emerald_fg = "#ffffff"
+                self.c_blue = "#2563eb"
+                self.c_violet = "#7c3aed"
+                self.c_amber = "#d97706"
+                self.c_red = "#dc2626"
+                self.c_text = "#0f172a"
+                self.c_muted = "#475569"
+                self.c_dim = "#64748b"
+            else:
+                self.c_bg = "#0b0e14"
+                self.c_sidebar = "#0f141c"
+                self.c_card = "#151c28"
+                self.c_card_hover = "#1e293b"
+                self.c_surface2 = "#1a2332"
+                self.c_border = "#263246"
+                self.c_emerald = "#10b981"
+                self.c_emerald_fg = "#06130e"
+                self.c_blue = "#3b82f6"
+                self.c_violet = "#8b5cf6"
+                self.c_amber = "#f59e0b"
+                self.c_red = "#ef4444"
+                self.c_text = "#f1f5f9"
+                self.c_muted = "#94a3b8"
+                self.c_dim = "#64748b"
+            self.root.configure(bg=self.c_bg)
 
-        ext = os.path.splitext(file_path)[1].lower()
-        mime = {
-            ".html": "text/html; charset=utf-8",
-            ".css": "text/css; charset=utf-8",
-            ".js": "application/javascript; charset=utf-8",
-            ".svg": "image/svg+xml",
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".ico": "image/x-icon",
-        }.get(ext, "application/octet-stream")
+        def _build_layout(self):
+            for child in self.root.winfo_children():
+                child.destroy()
 
-        try:
-            with open(file_path, "rb") as f:
-                content = f.read()
-            self.send_response(200)
-            self.send_header("Content-Type", mime)
-            self.send_header("Content-Length", str(len(content)))
-            self.end_headers()
-            self.wfile.write(content)
-        except Exception:
-            self.send_response(404)
-            self.end_headers()
+            # Bottom Handheld / Controller Legend Bar
+            self.legend_bar = tk.Frame(self.root, bg=self.c_sidebar, highlightbackground=self.c_border, highlightthickness=1, height=34)
+            legend_lbl = tk.Label(
+                self.legend_bar,
+                text="GAMEPAD / KEYBOARD:   [Arrows] Navigate Games   [Enter / Space] Configure / Install   [Esc] Close Drawer   [F5] Rescan   [F11] Fullscreen Handheld Mode",
+                bg=self.c_sidebar,
+                fg=self.c_muted,
+                font=("Sans", 9, "bold"),
+                padx=14,
+                pady=6,
+            )
+            legend_lbl.pack(side="left")
 
-    def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
-        pathname = parsed.path
-        body = self._read_json()
+            # Main Horizontal Container
+            self.main_wrap = tk.Frame(self.root, bg=self.c_bg)
+            self.main_wrap.pack(side="top", fill="both", expand=True)
 
-        try:
-            if pathname == "/api/shutdown":
-                self._send_json(200, {"success": True})
-                threading.Thread(target=self.server.shutdown, daemon=True).start()
+            # ---- Left Sidebar ----
+            self.sidebar = tk.Frame(self.main_wrap, bg=self.c_sidebar, width=235, highlightbackground=self.c_border, highlightthickness=1)
+            self.sidebar.pack(side="left", fill="y")
+            self.sidebar.pack_propagate(False)
+
+            # Brand Header
+            brand_frame = tk.Frame(self.sidebar, bg=self.c_sidebar, padx=16, pady=18)
+            brand_frame.pack( side="top", fill="x")
+            logo_lbl = tk.Label(
+                brand_frame,
+                text="⚡",
+                bg=self.c_amber,
+                fg="#0b0e14",
+                font=("Sans", 15, "bold"),
+                width=2,
+                padx=4,
+                pady=2,
+            )
+            logo_lbl.pack(side="left", padx=(0, 10))
+            title_col = tk.Frame(brand_frame, bg=self.c_sidebar)
+            title_col.pack(side="left", fill="x")
+            tk.Label(title_col, text="HelixSR", bg=self.c_sidebar, fg=self.c_text, font=("Sans", 14, "bold"), anchor="w").pack(fill="x")
+            tk.Label(
+                title_col,
+                text=f"MANAGER v{APP_VERSION} · CORE v{CORE_VERSION}",
+                bg=self.c_sidebar,
+                fg=self.c_dim,
+                font=("Sans", 8, "bold"),
+                anchor="w",
+            ).pack(fill="x")
+
+            tk.Frame(self.sidebar, bg=self.c_border, height=1).pack(fill="x", padx=14, pady=(0, 10))
+
+            # Navigation Items
+            self.nav_buttons = {}
+            nav_items = [
+                ("games", "🎮  Games Library"),
+                ("core", "⚡  Engine & Weights"),
+                ("myfsr", "🧩  My-FSR & FrameGen"),
+                ("settings", "⚙  Settings & Paths"),
+                ("about", "ℹ  About & Guide"),
+            ]
+            for tab_id, label in nav_items:
+                btn = tk.Button(
+                    self.sidebar,
+                    text=label,
+                    anchor="w",
+                    padx=16,
+                    pady=9,
+                    bd=0,
+                    relief="flat",
+                    cursor="hand2",
+                    font=("Sans", 10, "bold"),
+                    command=lambda tid=tab_id: self._switch_tab(tid),
+                )
+                btn.pack(fill="x", padx=10, pady=2)
+                self.nav_buttons[tab_id] = btn
+
+            # Sidebar Bottom Engine Status Card
+            self.sidebar_card = tk.Frame(self.sidebar, bg=self.c_card, highlightbackground=self.c_border, highlightthickness=1, padx=12, pady=12)
+            self.sidebar_card.pack(side="bottom", fill="x", padx=12, pady=14)
+            tk.Label(self.sidebar_card, text="HELIXSR ENGINE STATUS", bg=self.c_card, fg=self.c_dim, font=("Sans", 8, "bold"), anchor="w").pack(fill="x")
+            self.lbl_sidebar_status = tk.Label(self.sidebar_card, text="Checking core...", bg=self.c_card, fg=self.c_text, font=("Sans", 9, "bold"), anchor="w", pady=4)
+            self.lbl_sidebar_status.pack(fill="x")
+            self.btn_sidebar_compile = tk.Button(
+                self.sidebar_card,
+                text="Open Engine & Weights",
+                bg=self.c_surface2,
+                fg=self.c_text,
+                activebackground=self.c_emerald,
+                activeforeground=self.c_emerald_fg,
+                bd=0,
+                padx=8,
+                pady=5,
+                cursor="hand2",
+                font=("Sans", 9, "bold"),
+                command=lambda: self._switch_tab("core"),
+            )
+            self.btn_sidebar_compile.pack(fill="x", pady=(4, 0))
+            gpus = get_gpu_info()
+            gpu_name = gpus[0]["name"] if gpus else "Linux GPU"
+            if len(gpu_name) > 30:
+                gpu_name = gpu_name[:28] + ".."
+            tk.Label(self.sidebar_card, text=gpu_name, bg=self.c_card, fg=self.c_dim, font=("Sans", 8), anchor="w").pack(fill="x", pady=(6, 0))
+
+            # ---- Right Content Area ----
+            self.content_area = tk.Frame(self.main_wrap, bg=self.c_bg)
+            self.content_area.pack(side="left", fill="both", expand=True)
+
+            # Toast Notification Bar (hidden by default)
+            self.toast_frame = tk.Frame(self.content_area, bg=self.c_emerald, padx=16, pady=8)
+            self.lbl_toast = tk.Label(self.toast_frame, text="", bg=self.c_emerald, fg=self.c_emerald_fg, font=("Sans", 10, "bold"), anchor="w")
+            self.lbl_toast.pack(side="left", fill="x", expand=True)
+
+            # Tab Panes Container
+            self.panes_wrap = tk.Frame(self.content_area, bg=self.c_bg)
+            self.panes_wrap.pack(fill="both", expand=True)
+
+            self.panes = {}
+            for tid in ("games", "core", "myfsr", "settings", "about"):
+                f = tk.Frame(self.panes_wrap, bg=self.c_bg)
+                self.panes[tid] = f
+
+            self._build_games_pane(self.panes["games"])
+            self._build_core_pane(self.panes["core"])
+            self._build_myfsr_pane(self.panes["myfsr"])
+            self._build_settings_pane(self.panes["settings"])
+            self._build_about_pane(self.panes["about"])
+
+            self._switch_tab(self.current_tab)
+
+        def _show_toast(self, message, is_error=False):
+            bg = self.c_red if is_error else self.c_emerald
+            fg = "#ffffff" if is_error else self.c_emerald_fg
+            self.toast_frame.configure(bg=bg)
+            self.lbl_toast.configure(text=message, bg=bg, fg=fg)
+            self.toast_frame.pack(side="top", fill="x", before=self.panes_wrap)
+            if self.toast_after_id:
+                try:
+                    self.root.after_cancel(self.toast_after_id)
+                except Exception:
+                    pass
+            self.toast_after_id = self.root.after(4200, lambda: self.toast_frame.pack_forget())
+
+        def _switch_tab(self, tab_id):
+            self.current_tab = tab_id
+            for tid, f in self.panes.items():
+                f.pack_forget()
+            self.panes[tab_id].pack(fill="both", expand=True)
+
+            for tid, btn in self.nav_buttons.items():
+                if tid == tab_id:
+                    btn.configure(bg=self.c_emerald, fg=self.c_emerald_fg, activebackground=self.c_emerald, activeforeground=self.c_emerald_fg)
+                else:
+                    btn.configure(bg=self.c_sidebar, fg=self.c_muted, activebackground=self.c_card_hover, activeforeground=self.c_text)
+
+            if tab_id == "core":
+                self._refresh_core_ui()
+            elif tab_id == "myfsr":
+                self._refresh_myfsr_ui()
+            elif tab_id == "settings":
+                self._refresh_settings_ui()
+
+        # --------------------------------------------------------------------
+        # TAB 1: GAMES LIBRARY
+        # --------------------------------------------------------------------
+        def _build_games_pane(self, parent):
+            # Top Header & Action Bar
+            top_bar = tk.Frame(parent, bg=self.c_bg, padx=18, pady=14)
+            top_bar.pack(fill="x")
+
+            title_box = tk.Frame(top_bar, bg=self.c_bg)
+            title_box.pack(side="left")
+            tk.Label(title_box, text="Games Library", bg=self.c_bg, fg=self.c_text, font=("Sans", 16, "bold"), anchor="w").pack(anchor="w")
+            self.lbl_games_subtitle = tk.Label(
+                title_box,
+                text="Auto-detected Steam & Proton games compatible with HelixSR",
+                bg=self.c_bg,
+                fg=self.c_muted,
+                font=("Sans", 9),
+                anchor="w",
+            )
+            self.lbl_games_subtitle.pack(anchor="w")
+
+            actions_box = tk.Frame(top_bar, bg=self.c_bg)
+            actions_box.pack(side="right")
+
+            self._make_btn(actions_box, "🔄 Scan Library", self._rescan_games, bg=self.c_surface2, fg=self.c_text).pack(side="left", padx=4)
+            self._make_btn(actions_box, "➕ Add Game Folder", self._prompt_add_custom_folder, bg=self.c_surface2, fg=self.c_text).pack(side="left", padx=4)
+            self._make_btn(actions_box, "⚡ Install All", self._install_all_games, bg=self.c_emerald, fg=self.c_emerald_fg).pack(side="left", padx=4)
+            self._make_btn(actions_box, "↩ Restore All", self._uninstall_all_games, bg=self.c_surface2, fg=self.c_text).pack(side="left", padx=4)
+            self.btn_handheld = self._make_btn(actions_box, "🎮 Handheld", self._toggle_handheld_mode, bg=self.c_surface2, fg=self.c_text)
+            self.btn_handheld.pack(side="left", padx=4)
+
+            # Stats Summary Row
+            stats_row = tk.Frame(parent, bg=self.c_bg, padx=18, pady=2)
+            stats_row.pack(fill="x")
+            self.lbl_stat_total = self._make_stat_pill(stats_row, "TOTAL GAMES", "0", self.c_text)
+            self.lbl_stat_active = self._make_stat_pill(stats_row, "HELIXSR ACTIVE", "0", self.c_emerald)
+            self.lbl_stat_direct = self._make_stat_pill(stats_row, "DIRECT FSR 3.1", "0", self.c_blue)
+            self.lbl_stat_opti = self._make_stat_pill(stats_row, "OPTISCALER / DLSS", "0", self.c_violet)
+
+            # Filter & Search Toolbar
+            filter_bar = tk.Frame(parent, bg=self.c_bg, padx=18, pady=10)
+            filter_bar.pack(fill="x")
+
+            search_wrap = tk.Frame(filter_bar, bg=self.c_card, highlightbackground=self.c_border, highlightthickness=1, padx=8, pady=4)
+            search_wrap.pack(side="left", padx=(0, 10))
+            tk.Label(search_wrap, text="🔍", bg=self.c_card, fg=self.c_muted, font=("Sans", 9)).pack(side="left")
+            self.search_var = tk.StringVar()
+            self.search_var.trace_add("write", lambda *_: self._apply_game_filters())
+            self.entry_search = tk.Entry(
+                search_wrap,
+                textvariable=self.search_var,
+                bg=self.c_card,
+                fg=self.c_text,
+                insertbackground=self.c_text,
+                bd=0,
+                width=24,
+                font=("Sans", 10),
+            )
+            self.entry_search.pack(side="left", padx=6)
+
+            self.filter_pill_btns = {}
+            for fid, flabel in (
+                ("all", "All"),
+                ("installed", "Installed"),
+                ("direct", "Direct FSR"),
+                ("optiscaler", "OptiScaler"),
+                ("dlss", "DLSS Loader"),
+            ):
+                b = tk.Button(
+                    filter_bar,
+                    text=flabel,
+                    bd=0,
+                    padx=10,
+                    pady=5,
+                    cursor="hand2",
+                    font=("Sans", 9, "bold"),
+                    command=lambda k=fid: self._set_quick_filter(k),
+                )
+                b.pack(side="left", padx=2)
+                self.filter_pill_btns[fid] = b
+
+            self.btn_view_toggle = self._make_btn(
+                filter_bar,
+                "☰ List View" if self.is_grid_view else "⊞ Grid View",
+                self._toggle_view_mode,
+                bg=self.c_surface2,
+                fg=self.c_text,
+            )
+            self.btn_view_toggle.pack(side="right")
+
+            # Main Split Body: Left Games Scroll Area + Right Inspector Drawer
+            self.games_body = tk.Frame(parent, bg=self.c_bg, padx=18, pady=4)
+            self.games_body.pack(fill="both", expand=True)
+
+            # Left Scrollable Games List/Grid
+            self.games_list_wrap = tk.Frame(self.games_body, bg=self.c_bg)
+            self.games_list_wrap.pack(side="left", fill="both", expand=True)
+
+            self.games_canvas = tk.Canvas(self.games_list_wrap, bg=self.c_bg, highlightthickness=0, bd=0)
+            self.games_scrollbar = tk.Scrollbar(self.games_list_wrap, orient="vertical", command=self.games_canvas.yview)
+            self.games_inner = tk.Frame(self.games_canvas, bg=self.c_bg)
+
+            self.games_inner.bind(
+                "<Configure>",
+                lambda _e: self.games_canvas.configure(scrollregion=self.games_canvas.bbox("all")),
+            )
+            self.games_canvas_win = self.games_canvas.create_window((0, 0), window=self.games_inner, anchor="nw")
+            self.games_canvas.bind("<Configure>", self._on_games_canvas_resize)
+            self.games_canvas.configure(yscrollcommand=self.games_scrollbar.set)
+
+            self.games_canvas.pack(side="left", fill="both", expand=True)
+            self.games_scrollbar.pack(side="right", fill="y")
+
+            # Mouse wheel scrolling for Linux (<Button-4>/<Button-5>) and Windows/macOS (<MouseWheel>)
+            self.games_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+            self.games_canvas.bind_all("<Button-4>", self._on_mousewheel_linux)
+            self.games_canvas.bind_all("<Button-5>", self._on_mousewheel_linux)
+
+            # Right Inspector Drawer (hidden until a game is selected)
+            self.drawer_frame = tk.Frame(
+                self.games_body,
+                bg=self.c_card,
+                width=420,
+                highlightbackground=self.c_border,
+                highlightthickness=1,
+            )
+            self._build_drawer_ui(self.drawer_frame)
+
+            self._update_filter_pill_styles()
+
+        def _make_btn(self, parent, text, cmd, bg=None, fg=None, padx=10, pady=6):
+            return tk.Button(
+                parent,
+                text=text,
+                command=cmd,
+                bg=bg or self.c_surface2,
+                fg=fg or self.c_text,
+                activebackground=self.c_emerald,
+                activeforeground=self.c_emerald_fg,
+                bd=0,
+                relief="flat",
+                padx=padx,
+                pady=pady,
+                cursor="hand2",
+                font=("Sans", 9, "bold"),
+            )
+
+        def _make_stat_pill(self, parent, title, val, color):
+            card = tk.Frame(parent, bg=self.c_card, highlightbackground=self.c_border, highlightthickness=1, padx=14, pady=8)
+            card.pack(side="left", fill="x", expand=True, padx=(0, 8))
+            tk.Label(card, text=title, bg=self.c_card, fg=self.c_dim, font=("Sans", 8, "bold"), anchor="w").pack(fill="x")
+            val_lbl = tk.Label(card, text=val, bg=self.c_card, fg=color, font=("Sans", 15, "bold"), anchor="w")
+            val_lbl.pack(fill="x")
+            return val_lbl
+
+        def _on_games_canvas_resize(self, event):
+            self.games_canvas.itemconfig(self.games_canvas_win, width=event.width)
+
+        def _on_mousewheel(self, event):
+            if self.current_tab == "games":
+                self.games_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _on_mousewheel_linux(self, event):
+            if self.current_tab == "games":
+                if event.num == 4:
+                    self.games_canvas.yview_scroll(-3, "units")
+                elif event.num == 5:
+                    self.games_canvas.yview_scroll(3, "units")
+
+        def _set_quick_filter(self, fid):
+            self.quick_filter = fid
+            self._update_filter_pill_styles()
+            self._apply_game_filters()
+
+        def _update_filter_pill_styles(self):
+            for fid, btn in self.filter_pill_btns.items():
+                if fid == self.quick_filter:
+                    btn.configure(bg=self.c_emerald, fg=self.c_emerald_fg)
+                else:
+                    btn.configure(bg=self.c_card, fg=self.c_muted)
+
+        def _toggle_view_mode(self):
+            self.is_grid_view = not self.is_grid_view
+            self.btn_view_toggle.configure(text="☰ List View" if self.is_grid_view else "⊞ Grid View")
+            self._render_games()
+
+        def _apply_game_filters(self):
+            q = self.search_var.get().strip().lower() if hasattr(self, "search_var") else ""
+            res = []
+            for g in self.all_games:
+                if q and q not in g["name"].lower() and q not in (g.get("folder") or "").lower():
+                    continue
+                if self.quick_filter == "installed" and not g.get("installed"):
+                    continue
+                if self.quick_filter == "direct" and g.get("route") != "direct":
+                    continue
+                if self.quick_filter == "optiscaler" and g.get("route") != "optiscaler":
+                    continue
+                if self.quick_filter == "dlss" and g.get("route") != "dlss":
+                    continue
+                res.append(g)
+            self.filtered_games = res
+            self._render_games()
+
+        def _render_games(self):
+            for child in self.games_inner.winfo_children():
+                child.destroy()
+
+            total = len(self.all_games)
+            active = sum(1 for g in self.all_games if g.get("installed"))
+            direct = sum(1 for g in self.all_games if g.get("route") == "direct")
+            opti = sum(1 for g in self.all_games if g.get("route") in ("optiscaler", "dlss"))
+
+            self.lbl_stat_total.configure(text=str(total))
+            self.lbl_stat_active.configure(text=str(active))
+            self.lbl_stat_direct.configure(text=str(direct))
+            self.lbl_stat_opti.configure(text=str(opti))
+            self.nav_buttons["games"].configure(text=f"🎮  Games Library ({total})")
+
+            if not self.filtered_games:
+                empty = tk.Frame(self.games_inner, bg=self.c_card, highlightbackground=self.c_border, highlightthickness=1, padx=30, pady=40)
+                empty.pack(fill="x", pady=20, padx=10)
+                tk.Label(empty, text="No matching games found", bg=self.c_card, fg=self.c_text, font=("Sans", 13, "bold")).pack(pady=(0, 6))
+                tk.Label(
+                    empty,
+                    text="Click '➕ Add Game Folder' to add a game directory manually or '🔄 Scan Library' to refresh Steam libraries.",
+                    bg=self.c_card,
+                    fg=self.c_muted,
+                    font=("Sans", 10),
+                ).pack()
                 return
 
-            if pathname == "/api/scan":
-                games = scan_all_games()
-                return self._send_json(200, {"success": True, "count": len(games), "games": games})
+            if self.is_grid_view:
+                cols = 2 if self.selected_game else 3
+                for c in range(cols):
+                    self.games_inner.grid_columnconfigure(c, weight=1, uniform="gamecol")
+                for idx, g in enumerate(self.filtered_games):
+                    r = idx // cols
+                    c = idx % cols
+                    card = self._create_game_card(self.games_inner, g, idx)
+                    card.grid(row=r, column=c, sticky="nsew", padx=5, pady=5)
+            else:
+                for idx, g in enumerate(self.filtered_games):
+                    row = self._create_game_row(self.games_inner, g, idx)
+                    row.pack(fill="x", pady=3, padx=2)
 
-            if pathname == "/api/games/install":
-                res = install_helixsr(
-                    body.get("gameFolder"),
-                    route_override=body.get("route"),
-                    opti_dll=body.get("optiDllName"),
-                    use_fakenvapi=body.get("useFakeNvapi"),
-                    install_ref=body.get("installReFramework"),
-                    fg_mode=body.get("fgMode"),
+        def _create_game_card(self, parent, game, idx):
+            is_sel = self.selected_game and canonical_key(self.selected_game["folder"]) == canonical_key(game["folder"])
+            is_foc = idx == self.focused_index
+            border_col = self.c_emerald if (is_sel or is_foc) else self.c_border
+            border_w = 2 if (is_sel or is_foc) else 1
+
+            card = tk.Frame(parent, bg=self.c_card, highlightbackground=border_col, highlightthickness=border_w, padx=12, pady=12, cursor="hand2")
+
+            # Top Row: Launcher badge + Status badge
+            top = tk.Frame(card, bg=self.c_card)
+            top.pack(fill="x")
+            tk.Label(
+                top,
+                text=(game.get("launcher") or "Game").upper(),
+                bg=self.c_surface2,
+                fg=self.c_muted,
+                font=("Sans", 8, "bold"),
+                padx=6,
+                pady=2,
+            ).pack(side="left")
+
+            if game.get("installed"):
+                tk.Label(
+                    top,
+                    text="● HELIXSR ACTIVE",
+                    bg=self.c_emerald,
+                    fg=self.c_emerald_fg,
+                    font=("Sans", 8, "bold"),
+                    padx=7,
+                    pady=2,
+                ).pack(side="right")
+            else:
+                tk.Label(
+                    top,
+                    text="NOT INSTALLED",
+                    bg=self.c_surface2,
+                    fg=self.c_dim,
+                    font=("Sans", 8, "bold"),
+                    padx=6,
+                    pady=2,
+                ).pack(side="right")
+
+            # Game Name
+            name_lbl = tk.Label(
+                card,
+                text=game["name"],
+                bg=self.c_card,
+                fg=self.c_text,
+                font=("Sans", 11, "bold"),
+                anchor="w",
+                justify="left",
+                wraplength=260,
+            )
+            name_lbl.pack(fill="x", pady=(10, 4))
+
+            # Route Description
+            route_col = self.c_blue if game.get("route") == "direct" else (self.c_amber if game.get("route") == "dlss" else self.c_violet)
+            route_lbl = tk.Label(
+                card,
+                text=game.get("routeDisplay") or "OptiScaler",
+                bg=self.c_card,
+                fg=route_col,
+                font=("Sans", 9, "bold"),
+                anchor="w",
+            )
+            route_lbl.pack(fill="x")
+
+            folder_short = game.get("folder") or ""
+            if len(folder_short) > 42:
+                folder_short = "..." + folder_short[-39:]
+            path_lbl = tk.Label(card, text=folder_short, bg=self.c_card, fg=self.c_dim, font=("Sans", 8), anchor="w")
+            path_lbl.pack(fill="x", pady=(2, 10))
+
+            # Bottom Action Row
+            btn_row = tk.Frame(card, bg=self.c_card)
+            btn_row.pack(fill="x", side="bottom")
+            action_txt = "⚙ Configure / Update" if game.get("installed") else "⚡ Configure & Install"
+            btn = tk.Button(
+                btn_row,
+                text=action_txt,
+                bg=self.c_surface2 if not is_sel else self.c_emerald,
+                fg=self.c_text if not is_sel else self.c_emerald_fg,
+                bd=0,
+                padx=8,
+                pady=5,
+                cursor="hand2",
+                font=("Sans", 9, "bold"),
+                command=lambda g=game, i=idx: self._select_game(g, i),
+            )
+            btn.pack(fill="x")
+
+            for w in (card, top, name_lbl, route_lbl, path_lbl):
+                w.bind("<Button-1>", lambda _e, g=game, i=idx: self._select_game(g, i))
+
+            return card
+
+        def _create_game_row(self, parent, game, idx):
+            is_sel = self.selected_game and canonical_key(self.selected_game["folder"]) == canonical_key(game["folder"])
+            border_col = self.c_emerald if is_sel else self.c_border
+            row = tk.Frame(parent, bg=self.c_card, highlightbackground=border_col, highlightthickness=1, padx=12, pady=8, cursor="hand2")
+
+            status_txt = "ACTIVE" if game.get("installed") else "READY"
+            status_bg = self.c_emerald if game.get("installed") else self.c_surface2
+            status_fg = self.c_emerald_fg if game.get("installed") else self.c_dim
+            tk.Label(row, text=status_txt, bg=status_bg, fg=status_fg, font=("Sans", 8, "bold"), width=8, pady=2).pack(side="left", padx=(0, 10))
+
+            tk.Label(row, text=game["name"], bg=self.c_card, fg=self.c_text, font=("Sans", 10, "bold"), anchor="w").pack(side="left", fill="x", expand=True)
+            tk.Label(row, text=game.get("routeDisplay") or "", bg=self.c_card, fg=self.c_muted, font=("Sans", 9), padx=10).pack(side="left")
+
+            self._make_btn(
+                row,
+                "Configure",
+                lambda g=game, i=idx: self._select_game(g, i),
+                bg=self.c_emerald if is_sel else self.c_surface2,
+                fg=self.c_emerald_fg if is_sel else self.c_text,
+                padx=10,
+                pady=3,
+            ).pack(side="right")
+
+            row.bind("<Button-1>", lambda _e, g=game, i=idx: self._select_game(g, i))
+            return row
+
+        # --------------------------------------------------------------------
+        # RIGHT DRAWER: GAME CONFIGURATION & LOGS
+        # --------------------------------------------------------------------
+        def _build_drawer_ui(self, parent):
+            # Header
+            hdr = tk.Frame(parent, bg=self.c_sidebar, padx=14, pady=12)
+            hdr.pack(fill="x")
+            self.lbl_drawer_title = tk.Label(
+                hdr,
+                text="Select a Game",
+                bg=self.c_sidebar,
+                fg=self.c_text,
+                font=("Sans", 12, "bold"),
+                anchor="w",
+                wraplength=330,
+                justify="left",
+            )
+            self.lbl_drawer_title.pack(side="left", fill="x", expand=True)
+            tk.Button(
+                hdr,
+                text="✕",
+                bg=self.c_surface2,
+                fg=self.c_text,
+                bd=0,
+                padx=8,
+                pady=2,
+                cursor="hand2",
+                font=("Sans", 10, "bold"),
+                command=self._close_drawer,
+            ).pack(side="right")
+
+            # Primary Install / Restore / Launch Buttons
+            act = tk.Frame(parent, bg=self.c_card, padx=14, pady=10)
+            act.pack(fill="x")
+
+            self.btn_drawer_install = tk.Button(
+                act,
+                text="⚡ Install HelixSR",
+                bg=self.c_emerald,
+                fg=self.c_emerald_fg,
+                bd=0,
+                pady=8,
+                cursor="hand2",
+                font=("Sans", 10, "bold"),
+                command=self._drawer_install_clicked,
+            )
+            self.btn_drawer_install.pack(fill="x", pady=(0, 6))
+
+            sec_row = tk.Frame(act, bg=self.c_card)
+            sec_row.pack(fill="x")
+            self.btn_drawer_uninstall = self._make_btn(sec_row, "↩ Restore Original", self._drawer_uninstall_clicked, bg=self.c_red, fg="#ffffff")
+            self.btn_drawer_uninstall.pack(side="left", fill="x", expand=True, padx=(0, 4))
+            self.btn_drawer_launch = self._make_btn(sec_row, "▶ Launch", self._drawer_launch_clicked, bg=self.c_surface2, fg=self.c_text)
+            self.btn_drawer_launch.pack(side="left", padx=2)
+            self.btn_drawer_folder = self._make_btn(sec_row, "📂 Folder", self._drawer_folder_clicked, bg=self.c_surface2, fg=self.c_text)
+            self.btn_drawer_folder.pack(side="left", padx=2)
+            self.btn_drawer_cache = self._make_btn(sec_row, "🧹 Cache", self._drawer_cache_clicked, bg=self.c_surface2, fg=self.c_text)
+            self.btn_drawer_cache.pack(side="left", padx=(2, 0))
+
+            # Drawer Sub-Tabs
+            sub_nav = tk.Frame(parent, bg=self.c_sidebar, padx=14, pady=6)
+            sub_nav.pack(fill="x")
+            self.drawer_tab_btns = {}
+            for dt_id, dt_lbl in (("guide", "Configuration & Proton"), ("ini", "OptiScaler.ini"), ("logs", "Game Logs")):
+                b = tk.Button(
+                    sub_nav,
+                    text=dt_lbl,
+                    bd=0,
+                    padx=8,
+                    pady=4,
+                    cursor="hand2",
+                    font=("Sans", 9, "bold"),
+                    command=lambda d=dt_id: self._switch_drawer_tab(d),
                 )
-                return self._send_json(200, res)
+                b.pack(side="left", padx=(0, 4))
+                self.drawer_tab_btns[dt_id] = b
 
-            if pathname == "/api/games/uninstall":
-                res = uninstall_helixsr(body.get("gameFolder"))
-                return self._send_json(200, res)
+            self.drawer_body = tk.Frame(parent, bg=self.c_card, padx=14, pady=10)
+            self.drawer_body.pack(fill="both", expand=True)
 
-            if pathname == "/api/games/clear-cache":
-                manifests = get_steam_manifests()
-                g = scan_game(body.get("gameFolder"), None, manifests)
-                cleared = clear_shader_cache(g)
-                msg = f"Cleared shader & Proton pipeline cache for {g['name']}!" if cleared else f"No cached shader files found for {g['name']}."
-                return self._send_json(200, {"success": True, "cleared": cleared, "message": msg})
+            # Sub-pane 1: Configuration & Proton Guide
+            self.dpane_guide = tk.Frame(self.drawer_body, bg=self.c_card)
 
-            if pathname == "/api/games/install-all":
-                games = scan_all_games()
-                results = []
-                for g in games:
-                    if not g["installed"] and g["route"]:
+            # SteamOS / Linux Proton Launch Option Box
+            proton_box = tk.Frame(self.dpane_guide, bg=self.c_surface2, highlightbackground=self.c_border, highlightthickness=1, padx=10, pady=8)
+            proton_box.pack(fill="x", pady=(0, 10))
+            tk.Label(
+                proton_box,
+                text="🐧 STEAMOS / PROTON LAUNCH OPTION",
+                bg=self.c_surface2,
+                fg=self.c_emerald,
+                font=("Sans", 8, "bold"),
+                anchor="w",
+            ).pack(fill="x")
+            p_row = tk.Frame(proton_box, bg=self.c_surface2)
+            p_row.pack(fill="x", pady=(4, 0))
+            self.proton_cmd_var = tk.StringVar()
+            self.entry_proton_cmd = tk.Entry(
+                p_row,
+                textvariable=self.proton_cmd_var,
+                bg=self.c_card,
+                fg=self.c_text,
+                readonlybackground=self.c_card,
+                bd=0,
+                font=("Monospace", 9),
+                state="readonly",
+            )
+            self.entry_proton_cmd.pack(side="left", fill="x", expand=True, ipady=4, padx=(0, 6))
+            self._make_btn(p_row, "📋 Copy", self._copy_proton_launch_option, bg=self.c_emerald, fg=self.c_emerald_fg, padx=8, pady=3).pack(side="right")
+
+            # Route selection
+            tk.Label(self.dpane_guide, text="INSTALLATION METHOD", bg=self.c_card, fg=self.c_dim, font=("Sans", 8, "bold"), anchor="w").pack(fill="x", pady=(4, 2))
+            self.var_route = tk.StringVar(value="optiscaler")
+            self.route_options = [
+                ("optiscaler", "OptiScaler Proxy (DLSS / XeSS / FSR -> HelixSR)"),
+                ("direct", "Direct FSR 3.1 Swap (amd_fidelityfx_dx12.dll)"),
+                ("dlss", "DLSS Loader (Experimental dxgi.dll + nvngx.dll)"),
+            ]
+            for r_val, r_lbl in self.route_options:
+                rb = tk.Radiobutton(
+                    self.dpane_guide,
+                    text=r_lbl,
+                    variable=self.var_route,
+                    value=r_val,
+                    bg=self.c_card,
+                    fg=self.c_text,
+                    selectcolor=self.c_surface2,
+                    activebackground=self.c_card,
+                    activeforeground=self.c_emerald,
+                    font=("Sans", 9),
+                    anchor="w",
+                    command=self._on_drawer_option_changed,
+                )
+                rb.pack(fill="x")
+
+            # OptiScaler Proxy DLL Name + FrameGen
+            self.opti_opts_frame = tk.Frame(self.dpane_guide, bg=self.c_card)
+            self.opti_opts_frame.pack(fill="x", pady=6)
+
+            dll_row = tk.Frame(self.opti_opts_frame, bg=self.c_card)
+            dll_row.pack(fill="x", pady=2)
+            tk.Label(dll_row, text="Proxy DLL:", bg=self.c_card, fg=self.c_muted, font=("Sans", 9, "bold"), width=12, anchor="w").pack(side="left")
+            self.var_opti_dll = tk.StringVar(value="dxgi.dll")
+            self.opt_dll_menu = tk.OptionMenu(dll_row, self.var_opti_dll, *OPTI_NAMES, command=lambda _v: self._on_drawer_option_changed())
+            self.opt_dll_menu.configure(bg=self.c_surface2, fg=self.c_text, bd=0, highlightthickness=0, font=("Sans", 9))
+            self.opt_dll_menu.pack(side="left", fill="x", expand=True)
+
+            fg_row = tk.Frame(self.opti_opts_frame, bg=self.c_card)
+            fg_row.pack(fill="x", pady=4)
+            tk.Label(fg_row, text="FrameGen:", bg=self.c_card, fg=self.c_muted, font=("Sans", 9, "bold"), width=12, anchor="w").pack(side="left")
+            self.fg_label_to_key = {
+                "Auto / Disabled": "auto",
+                "OptiFG -> AMD FSR 3.1 FG": "optifg_fsrfg",
+                "DLSS-G -> AMD FSR 3.1 FG": "dlssg_fsrfg",
+                "DLSS-G -> Intel XeFG": "dlssg_xefg",
+                "DLSS-G -> Nukem FG": "dlssg_nukems",
+            }
+            self.fg_key_to_label = {v: k for k, v in self.fg_label_to_key.items()}
+            self.var_fg_label = tk.StringVar(value="Auto / Disabled")
+            self.fg_menu = tk.OptionMenu(fg_row, self.var_fg_label, *self.fg_label_to_key.keys())
+            self.fg_menu.configure(bg=self.c_surface2, fg=self.c_text, bd=0, highlightthickness=0, font=("Sans", 9))
+            self.fg_menu.pack(side="left", fill="x", expand=True)
+
+            self.var_fakenvapi = tk.BooleanVar(value=True)
+            tk.Checkbutton(
+                self.opti_opts_frame,
+                text="Bundle FakeNVAPI (fakenvapi.dll for DLSS exposure)",
+                variable=self.var_fakenvapi,
+                bg=self.c_card,
+                fg=self.c_text,
+                selectcolor=self.c_surface2,
+                activebackground=self.c_card,
+                activeforeground=self.c_emerald,
+                font=("Sans", 9),
+                anchor="w",
+            ).pack(fill="x", pady=2)
+
+            self.var_reframework = tk.BooleanVar(value=False)
+            tk.Checkbutton(
+                self.dpane_guide,
+                text="Install REFramework Nightly (Capcom RE Engine games)",
+                variable=self.var_reframework,
+                bg=self.c_card,
+                fg=self.c_text,
+                selectcolor=self.c_surface2,
+                activebackground=self.c_card,
+                activeforeground=self.c_emerald,
+                font=("Sans", 9),
+                anchor="w",
+                command=self._on_drawer_option_changed,
+            ).pack(fill="x", pady=2)
+
+            self.lbl_drawer_info = tk.Label(
+                self.dpane_guide,
+                text="",
+                bg=self.c_surface2,
+                fg=self.c_muted,
+                font=("Sans", 8),
+                justify="left",
+                anchor="nw",
+                wraplength=380,
+                padx=10,
+                pady=8,
+            )
+            self.lbl_drawer_info.pack(fill="x", pady=(8, 0))
+
+            # Sub-pane 2: OptiScaler.ini Editor
+            self.dpane_ini = tk.Frame(self.drawer_body, bg=self.c_card)
+            ini_btn_row = tk.Frame(self.dpane_ini, bg=self.c_card)
+            ini_btn_row.pack(fill="x", pady=(0, 6))
+            self._make_btn(ini_btn_row, "💾 Save OptiScaler.ini", self._save_drawer_ini, bg=self.c_emerald, fg=self.c_emerald_fg).pack(side="left", padx=(0, 6))
+            self._make_btn(ini_btn_row, "🔄 Reload", self._reload_drawer_logs_and_ini, bg=self.c_surface2, fg=self.c_text).pack(side="left")
+            self.txt_ini = tk.Text(self.dpane_ini, bg=self.c_bg, fg=self.c_text, insertbackground=self.c_text, font=("Monospace", 9), bd=0, wrap="none")
+            self.txt_ini.pack(fill="both", expand=True)
+
+            # Sub-pane 3: Game Logs
+            self.dpane_logs = tk.Frame(self.drawer_body, bg=self.c_card)
+            log_btn_row = tk.Frame(self.dpane_logs, bg=self.c_card)
+            log_btn_row.pack(fill="x", pady=(0, 6))
+            self._make_btn(log_btn_row, "🔄 Refresh Logs", self._reload_drawer_logs_and_ini, bg=self.c_surface2, fg=self.c_text).pack(side="left")
+            self.txt_logs = tk.Text(self.dpane_logs, bg=self.c_bg, fg=self.c_text, font=("Monospace", 8), bd=0, wrap="word")
+            self.txt_logs.pack(fill="both", expand=True)
+
+            self._switch_drawer_tab("guide")
+
+        def _switch_drawer_tab(self, dt_id):
+            self.drawer_tab = dt_id
+            for p in (self.dpane_guide, self.dpane_ini, self.dpane_logs):
+                p.pack_forget()
+            if dt_id == "guide":
+                self.dpane_guide.pack(fill="both", expand=True)
+            elif dt_id == "ini":
+                self.dpane_ini.pack(fill="both", expand=True)
+                self._reload_drawer_logs_and_ini()
+            elif dt_id == "logs":
+                self.dpane_logs.pack(fill="both", expand=True)
+                self._reload_drawer_logs_and_ini()
+
+            for k, b in self.drawer_tab_btns.items():
+                if k == dt_id:
+                    b.configure(bg=self.c_emerald, fg=self.c_emerald_fg)
+                else:
+                    b.configure(bg=self.c_surface2, fg=self.c_muted)
+
+        def _select_game(self, game, idx=0):
+            manifests = get_steam_manifests()
+            fresh = scan_game(game["folder"], game["name"], manifests)
+            self.selected_game = fresh
+            self.focused_index = idx
+
+            self.drawer_frame.pack(side="right", fill="y", padx=(10, 0))
+            self.drawer_frame.pack_propagate(False)
+
+            self.updating_drawer = True
+            try:
+                self.lbl_drawer_title.configure(text=fresh["name"])
+                self.var_route.set(fresh.get("route") or "optiscaler")
+                self.var_opti_dll.set(fresh.get("optiDllName") or "dxgi.dll")
+                fg_key = fresh.get("fgMode") or "auto"
+                self.var_fg_label.set(self.fg_key_to_label.get(fg_key, "Auto / Disabled"))
+                self.var_fakenvapi.set(bool(fresh.get("useFakeNvapi", True)))
+                self.var_reframework.set(bool(fresh.get("installReFramework", False)))
+
+                if fresh.get("installed"):
+                    self.btn_drawer_install.configure(text="⚡ Update / Reinstall HelixSR")
+                    self.btn_drawer_uninstall.configure(state="normal")
+                else:
+                    self.btn_drawer_install.configure(text="⚡ Install HelixSR")
+                    self.btn_drawer_uninstall.configure(state="disabled")
+
+                self._update_drawer_proton_and_info()
+            finally:
+                self.updating_drawer = False
+
+            if self.drawer_tab in ("ini", "logs"):
+                self._reload_drawer_logs_and_ini()
+            self._render_games()
+
+        def _close_drawer(self):
+            self.selected_game = None
+            self.drawer_frame.pack_forget()
+            self._render_games()
+
+        def _on_drawer_option_changed(self):
+            if self.updating_drawer or not self.selected_game:
+                return
+            self._update_drawer_proton_and_info()
+
+        def _update_drawer_proton_and_info(self):
+            if not self.selected_game:
+                return
+            route = self.var_route.get()
+            opti_dll = self.var_opti_dll.get()
+            install_ref = self.var_reframework.get()
+
+            if route == "optiscaler":
+                self.opti_opts_frame.pack(fill="x", pady=6)
+            else:
+                self.opti_opts_frame.pack_forget()
+
+            proton_cmd = compute_proton_launch_option(route, opti_dll, install_ref)
+            self.proton_cmd_var.set(proton_cmd or "(No DLL override needed for Direct FSR 3.1)")
+
+            exe_dir = self.selected_game.get("exeFolder") or self.selected_game.get("folder") or ""
+            inputs = []
+            if self.selected_game.get("hasDlss"):
+                inputs.append("DLSS")
+            if self.selected_game.get("hasXess"):
+                inputs.append("XeSS")
+            if self.selected_game.get("fsrTargets"):
+                inputs.append("FSR 3.1")
+            inputs_str = ", ".join(inputs) if inputs else "Generic DirectX 12"
+
+            guide = (
+                f"Target Folder: {exe_dir}\n"
+                f"Detected Upscalers: {inputs_str}\n\n"
+                "SteamOS / Proton Setup:\n"
+                "1. Click 'Install HelixSR' above.\n"
+                "2. Copy the Proton Launch Option above into Steam -> Game Properties -> Launch Options.\n"
+                "3. Enable DLSS or FSR in the game's graphics settings (press Insert in-game for OptiScaler menu)."
+            )
+            self.lbl_drawer_info.configure(text=guide)
+
+        def _copy_proton_launch_option(self):
+            cmd = self.proton_cmd_var.get()
+            if not cmd or cmd.startswith("("):
+                self._show_toast("No special Proton launch option needed for Direct FSR 3.1.")
+                return
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(cmd)
+                self.root.update()
+            except Exception:
+                pass
+            if os.name != "nt":
+                for clip_cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]):
+                    if shutil.which(clip_cmd[0]):
                         try:
-                            r = install_helixsr(g["folder"])
-                            results.append({"name": g["name"], "success": True, "message": r["message"]})
-                        except Exception as e:
-                            results.append({"name": g["name"], "success": False, "error": str(e)})
-                return self._send_json(200, {"success": True, "results": results})
+                            p = subprocess.Popen(clip_cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=get_clean_desktop_env())
+                            p.communicate(input=cmd.encode("utf-8"), timeout=1.5)
+                            break
+                        except Exception:
+                            pass
+            self._show_toast(f"Copied to clipboard: {cmd}")
 
-            if pathname == "/api/games/uninstall-all":
-                games = scan_all_games()
-                results = []
-                for g in games:
-                    if g["installed"]:
-                        try:
-                            r = uninstall_helixsr(g["folder"])
-                            results.append({"name": g["name"], "success": True, "message": r["message"]})
-                        except Exception as e:
-                            results.append({"name": g["name"], "success": False, "error": str(e)})
-                return self._send_json(200, {"success": True, "results": results})
+        def _drawer_install_clicked(self):
+            if not self.selected_game:
+                return
+            try:
+                fg_mode = self.fg_label_to_key.get(self.var_fg_label.get(), "auto")
+                res = install_helixsr(
+                    self.selected_game["folder"],
+                    route_override=self.var_route.get(),
+                    opti_dll=self.var_opti_dll.get(),
+                    use_fakenvapi=self.var_fakenvapi.get(),
+                    install_ref=self.var_reframework.get(),
+                    fg_mode=fg_mode,
+                )
+                self._show_toast(res["message"])
+                self._rescan_games(keep_selection=True)
+            except Exception as e:
+                self._show_toast(str(e), is_error=True)
+                if "not been compiled yet" in str(e):
+                    self._switch_tab("core")
 
-            if pathname == "/api/games/launch":
-                return self._send_json(200, launch_game_native(body.get("gameFolder")))
+        def _drawer_uninstall_clicked(self):
+            if not self.selected_game:
+                return
+            try:
+                res = uninstall_helixsr(self.selected_game["folder"])
+                self._show_toast(res["message"])
+                self._rescan_games(keep_selection=True)
+            except Exception as e:
+                self._show_toast(str(e), is_error=True)
 
-            if pathname == "/api/games/open-folder":
-                return self._send_json(200, open_folder_native(body.get("path")))
+        def _drawer_launch_clicked(self):
+            if not self.selected_game:
+                return
+            res = launch_game_native(self.selected_game["folder"])
+            if res.get("success"):
+                self._show_toast(res.get("message", "Launching game..."))
+            else:
+                self._show_toast(res.get("error", "Could not launch game"), is_error=True)
 
-            if pathname == "/api/games/save-ini":
-                manifests = get_steam_manifests()
-                g = scan_game(body.get("gameFolder"), None, manifests)
-                t = g.get("exeFolder") or body.get("gameFolder")
-                with open(os.path.join(t, "OptiScaler.ini"), "w", encoding="utf-8") as f:
-                    f.write(body.get("content", ""))
-                return self._send_json(200, {"success": True})
+        def _drawer_folder_clicked(self):
+            if not self.selected_game:
+                return
+            target = self.selected_game.get("exeFolder") or self.selected_game.get("folder")
+            res = open_folder_native(target)
+            if not res.get("success"):
+                self._show_toast(res.get("error", "Could not open folder"), is_error=True)
 
-            if pathname == "/api/games/add-custom":
-                fp = body.get("folderPath", "").strip()
-                if not fp or not os.path.isdir(fp):
-                    return self._send_json(400, {"success": False, "error": "Directory does not exist"})
+        def _drawer_cache_clicked(self):
+            if not self.selected_game:
+                return
+            cleared = clear_shader_cache(self.selected_game)
+            msg = f"Cleared shader & Proton pipeline cache for {self.selected_game['name']}!" if cleared else "No cached shader files found."
+            self._show_toast(msg)
+
+        def _reload_drawer_logs_and_ini(self):
+            if not self.selected_game:
+                return
+            data = get_game_logs_and_ini(self.selected_game["folder"])
+            self.txt_ini.delete("1.0", "end")
+            self.txt_ini.insert("1.0", data["optiscalerIni"] or "# OptiScaler.ini not created yet. Install HelixSR (OptiScaler route) first.")
+
+            combined_logs = ""
+            if data["helixsrLog"]:
+                combined_logs += "=== helixsr.log ===\n" + data["helixsrLog"] + "\n\n"
+            if data["optiscalerLog"]:
+                combined_logs += "=== OptiScaler.log ===\n" + data["optiscalerLog"] + "\n"
+            if not combined_logs:
+                combined_logs = "No log files found yet. Launch the game after installing HelixSR to generate logs."
+            self.txt_logs.delete("1.0", "end")
+            self.txt_logs.insert("1.0", combined_logs)
+
+        def _save_drawer_ini(self):
+            if not self.selected_game:
+                return
+            data = get_game_logs_and_ini(self.selected_game["folder"])
+            exe_dir = data.get("exeFolder") or self.selected_game["folder"]
+            try:
+                content = self.txt_ini.get("1.0", "end-1c")
+                with open(os.path.join(exe_dir, "OptiScaler.ini"), "w", encoding="utf-8") as f:
+                    f.write(content)
+                self._show_toast("Saved OptiScaler.ini successfully!")
+            except Exception as e:
+                self._show_toast(f"Failed to save OptiScaler.ini: {e}", is_error=True)
+
+        # --------------------------------------------------------------------
+        # TAB 2: ENGINE & WEIGHTS
+        # --------------------------------------------------------------------
+        def _build_core_pane(self, parent):
+            wrap = tk.Frame(parent, bg=self.c_bg, padx=22, pady=18)
+            wrap.pack(fill="both", expand=True)
+
+            tk.Label(wrap, text="HelixSR Engine & Neural Network Weights", bg=self.c_bg, fg=self.c_text, font=("Sans", 16, "bold"), anchor="w").pack(fill="x")
+            tk.Label(
+                wrap,
+                text="Compile the HelixSR neural network weights & RDNA compute kernels into amd_fidelityfx_dx12.dll (one-time build).",
+                bg=self.c_bg,
+                fg=self.c_muted,
+                font=("Sans", 9),
+                anchor="w",
+            ).pack(fill="x", pady=(2, 14))
+
+            cards_row = tk.Frame(wrap, bg=self.c_bg)
+            cards_row.pack(fill="x", pady=(0, 14))
+            self.lbl_core_ver = self._make_stat_pill(cards_row, "CORE VERSION", f"v{CORE_VERSION}", self.c_text)
+            self.lbl_core_status = self._make_stat_pill(cards_row, "NETWORK STATUS", "Checking...", self.c_amber)
+            self.lbl_core_weights = self._make_stat_pill(cards_row, "WEIGHTS SIZE", "0 KB", self.c_blue)
+            self.lbl_core_kernels = self._make_stat_pill(cards_row, "KERNELS SIZE", "0 KB", self.c_violet)
+
+            # Compiler Configuration Card
+            cfg_card = tk.Frame(wrap, bg=self.c_card, highlightbackground=self.c_border, highlightthickness=1, padx=16, pady=14)
+            cfg_card.pack(fill="x", pady=(0, 14))
+
+            tk.Label(
+                cfg_card,
+                text="DLSS 310.7.0 WEIGHTS SOURCE (OPTIONAL LOCAL OVERRIDE)",
+                bg=self.c_card,
+                fg=self.c_dim,
+                font=("Sans", 8, "bold"),
+                anchor="w",
+            ).pack(fill="x")
+
+            src_row = tk.Frame(cfg_card, bg=self.c_card)
+            src_row.pack(fill="x", pady=8)
+            self.dlss_source_var = tk.StringVar(value="")
+            self.entry_dlss_source = tk.Entry(
+                src_row,
+                textvariable=self.dlss_source_var,
+                bg=self.c_bg,
+                fg=self.c_text,
+                insertbackground=self.c_text,
+                bd=0,
+                font=("Sans", 10),
+            )
+            self.entry_dlss_source.pack(side="left", fill="x", expand=True, ipady=6, padx=(0, 8))
+            self._make_btn(src_row, "📂 Browse nvngx_dlss.dll...", self._browse_dlss_dll, bg=self.c_surface2, fg=self.c_text).pack(side="left", padx=(0, 8))
+            self.btn_start_build = self._make_btn(
+                src_row,
+                "⚡ Build HelixSR Network",
+                self._on_start_build_clicked,
+                bg=self.c_emerald,
+                fg=self.c_emerald_fg,
+                padx=16,
+                pady=7,
+            )
+            self.btn_start_build.pack(side="right")
+
+            tk.Label(
+                cfg_card,
+                text="Leave blank to automatically download NVIDIA's official DLSS 310.7.0 DLL from GitHub during compilation. On SteamOS, Proton/Wine and portable Python are configured automatically.",
+                bg=self.c_card,
+                fg=self.c_muted,
+                font=("Sans", 8),
+                anchor="w",
+            ).pack(fill="x")
+
+            # Live Compiler Console
+            tk.Label(wrap, text="LIVE COMPILER CONSOLE", bg=self.c_bg, fg=self.c_dim, font=("Sans", 8, "bold"), anchor="w").pack(fill="x", pady=(0, 4))
+            self.txt_build_console = tk.Text(
+                wrap,
+                bg="#070a0e" if not self.is_light else "#1e293b",
+                fg="#10b981",
+                font=("Monospace", 9),
+                bd=0,
+                padx=12,
+                pady=10,
+                wrap="word",
+            )
+            self.txt_build_console.pack(fill="both", expand=True)
+            self.txt_build_console.insert("1.0", "[HelixSR Manager] Ready. Click 'Build HelixSR Network' to compile weights and RDNA shaders.\n")
+
+        def _browse_dlss_dll(self):
+            path = filedialog.askopenfilename(
+                title="Select nvngx_dlss.dll",
+                filetypes=[("DLSS DLL", "nvngx_dlss.dll *.dll"), ("All Files", "*.*")],
+            )
+            if path:
+                self.dlss_source_var.set(path)
+
+        def _on_start_build_clicked(self):
+            if IS_BUILDING:
+                self._show_toast("A network build is already in progress.", is_error=True)
+                return
+            self.txt_build_console.delete("1.0", "end")
+            dlss_path = self.dlss_source_var.get().strip()
+            res = start_network_build(dlss_path=dlss_path)
+            if res.get("success"):
+                self._show_toast("Started HelixSR Network compilation!")
+                self._refresh_core_ui()
+            else:
+                self._show_toast(res.get("error", "Could not start build"), is_error=True)
+
+        def _refresh_core_ui(self):
+            st = get_core_status()
+            built = st.get("weightsBuilt", False)
+            if built:
+                self.lbl_core_status.configure(text="READY (BUILT)", fg=self.c_emerald)
+                self.lbl_sidebar_status.configure(text="● Network Ready & Built", fg=self.c_emerald)
+            else:
+                self.lbl_core_status.configure(text="NOT BUILT", fg=self.c_amber)
+                self.lbl_sidebar_status.configure(text="● Setup Required (Click below)", fg=self.c_amber)
+
+            w_kb = int((st.get("weightsSize") or 0) / 1024)
+            k_kb = int((st.get("kernelsSize") or 0) / 1024)
+            self.lbl_core_weights.configure(text=f"{w_kb:,} KB" if w_kb else "Not Built")
+            self.lbl_core_kernels.configure(text=f"{k_kb:,} KB" if k_kb else "Not Built")
+
+            if IS_BUILDING:
+                self.btn_start_build.configure(text="⏳ Compiling Network...", state="disabled")
+            else:
+                self.btn_start_build.configure(
+                    text="⚡ Rebuild HelixSR Network" if built else "⚡ Build HelixSR Network",
+                    state="normal",
+                )
+
+        # --------------------------------------------------------------------
+        # TAB 3: MY-FSR & FRAMEGEN
+        # --------------------------------------------------------------------
+        def _build_myfsr_pane(self, parent):
+            wrap = tk.Frame(parent, bg=self.c_bg, padx=22, pady=18)
+            wrap.pack(fill="both", expand=True)
+
+            tk.Label(wrap, text="My-FSR & Custom Frame Generation DLLs", bg=self.c_bg, fg=self.c_text, font=("Sans", 16, "bold"), anchor="w").pack(fill="x")
+            tk.Label(
+                wrap,
+                text="Drop custom FSR upscaler DLLs (such as FSR 4) or Frame Generation DLLs into core/my-fsr to bundle them into OptiScaler games.",
+                bg=self.c_bg,
+                fg=self.c_muted,
+                font=("Sans", 9),
+                anchor="w",
+            ).pack(fill="x", pady=(2, 14))
+
+            btn_row = tk.Frame(wrap, bg=self.c_bg)
+            btn_row.pack(fill="x", pady=(0, 12))
+            self._make_btn(btn_row, "➕ Import Custom DLL...", self._import_myfsr_dll, bg=self.c_emerald, fg=self.c_emerald_fg).pack(side="left", padx=(0, 8))
+            self._make_btn(btn_row, "📂 Open core/my-fsr Folder", self._open_core_myfsr_folder, bg=self.c_surface2, fg=self.c_text).pack(side="left", padx=(0, 8))
+            self._make_btn(btn_row, "🔄 Refresh List", self._refresh_myfsr_ui, bg=self.c_surface2, fg=self.c_text).pack(side="left")
+
+            self.myfsr_list_frame = tk.Frame(wrap, bg=self.c_card, highlightbackground=self.c_border, highlightthickness=1, padx=16, pady=14)
+            self.myfsr_list_frame.pack(fill="both", expand=True)
+
+        def _refresh_myfsr_ui(self):
+            for child in self.myfsr_list_frame.winfo_children():
+                child.destroy()
+            my_fsr_dir = os.path.join(CORE_DIR, MY_FSR_FOLDER)
+            os.makedirs(my_fsr_dir, exist_ok=True)
+            tk.Label(self.myfsr_list_frame, text=f"Directory: {my_fsr_dir}", bg=self.c_card, fg=self.c_dim, font=("Sans", 9), anchor="w").pack(fill="x", pady=(0, 10))
+
+            dlls = [f for f in os.listdir(my_fsr_dir) if f.lower().endswith(".dll")] if os.path.isdir(my_fsr_dir) else []
+            if not dlls:
+                tk.Label(
+                    self.myfsr_list_frame,
+                    text="No custom DLLs currently in core/my-fsr.\n\n" + MY_FSR_README,
+                    bg=self.c_card,
+                    fg=self.c_muted,
+                    font=("Sans", 9),
+                    justify="left",
+                    anchor="w",
+                ).pack(fill="x")
+            else:
+                for fn in sorted(dlls):
+                    fp = os.path.join(my_fsr_dir, fn)
+                    sz_kb = int(os.path.getsize(fp) / 1024)
+                    r = tk.Frame(self.myfsr_list_frame, bg=self.c_surface2, padx=10, pady=6)
+                    r.pack(fill="x", pady=3)
+                    tk.Label(r, text=f"🧩 {fn} ({sz_kb:,} KB)", bg=self.c_surface2, fg=self.c_text, font=("Sans", 9, "bold")).pack(side="left")
+
+        def _import_myfsr_dll(self):
+            path = filedialog.askopenfilename(title="Select Custom FSR or FrameGen DLL", filetypes=[("DLL Files", "*.dll"), ("All Files", "*.*")])
+            if path and os.path.isfile(path):
+                my_fsr_dir = os.path.join(CORE_DIR, MY_FSR_FOLDER)
+                os.makedirs(my_fsr_dir, exist_ok=True)
+                dst = os.path.join(my_fsr_dir, os.path.basename(path))
+                shutil.copy2(path, dst)
+                self._show_toast(f"Imported {os.path.basename(path)} into core/my-fsr!")
+                self._refresh_myfsr_ui()
+
+        def _open_core_myfsr_folder(self):
+            my_fsr_dir = os.path.join(CORE_DIR, MY_FSR_FOLDER)
+            os.makedirs(my_fsr_dir, exist_ok=True)
+            open_folder_native(my_fsr_dir)
+
+        # --------------------------------------------------------------------
+        # TAB 4: SETTINGS & PATHS
+        # --------------------------------------------------------------------
+        def _build_settings_pane(self, parent):
+            wrap = tk.Frame(parent, bg=self.c_bg, padx=22, pady=18)
+            wrap.pack(fill="both", expand=True)
+
+            tk.Label(wrap, text="Settings & Library Paths", bg=self.c_bg, fg=self.c_text, font=("Sans", 16, "bold"), anchor="w").pack(fill="x", pady=(0, 14))
+
+            app_card = tk.Frame(wrap, bg=self.c_card, highlightbackground=self.c_border, highlightthickness=1, padx=16, pady=12)
+            app_card.pack(fill="x", pady=(0, 14))
+            tk.Label(app_card, text="APPEARANCE & DISPLAY", bg=self.c_card, fg=self.c_dim, font=("Sans", 8, "bold"), anchor="w").pack(fill="x", pady=(0, 6))
+            row = tk.Frame(app_card, bg=self.c_card)
+            row.pack(fill="x")
+            self._make_btn(
+                row,
+                "☀ Switch to Light Theme" if not self.is_light else "🌙 Switch to Aurora Dark Theme",
+                self._toggle_theme,
+                bg=self.c_surface2,
+                fg=self.c_text,
+            ).pack(side="left", padx=(0, 8))
+            self._make_btn(row, "🎮 Toggle Fullscreen Handheld Mode (F11)", self._toggle_handheld_mode, bg=self.c_surface2, fg=self.c_text).pack(side="left")
+
+            self.settings_paths_frame = tk.Frame(wrap, bg=self.c_card, highlightbackground=self.c_border, highlightthickness=1, padx=16, pady=12)
+            self.settings_paths_frame.pack(fill="both", expand=True)
+
+        def _refresh_settings_ui(self):
+            for child in self.settings_paths_frame.winfo_children():
+                child.destroy()
+
+            tk.Label(
+                self.settings_paths_frame,
+                text="AUTO-DETECTED STEAM LIBRARIES (INTERNAL & MICROSD)",
+                bg=self.c_card,
+                fg=self.c_dim,
+                font=("Sans", 8, "bold"),
+                anchor="w",
+            ).pack(fill="x", pady=(0, 4))
+
+            libs = get_steam_libraries()
+            if not libs:
+                tk.Label(self.settings_paths_frame, text="No Steam library folders detected.", bg=self.c_card, fg=self.c_muted, font=("Sans", 9), anchor="w").pack(fill="x")
+            else:
+                for lib in libs:
+                    tk.Label(self.settings_paths_frame, text=f"• {lib}", bg=self.c_card, fg=self.c_text, font=("Monospace", 9), anchor="w").pack(fill="x", pady=1)
+
+            tk.Frame(self.settings_paths_frame, bg=self.c_border, height=1).pack(fill="x", pady=12)
+
+            hdr = tk.Frame(self.settings_paths_frame, bg=self.c_card)
+            hdr.pack(fill="x", pady=(0, 6))
+            tk.Label(hdr, text="CUSTOM GAME FOLDERS (HEROIC / LUTRIS / STANDALONE)", bg=self.c_card, fg=self.c_dim, font=("Sans", 8, "bold"), anchor="w").pack(side="left")
+            self._make_btn(hdr, "➕ Add Folder", self._prompt_add_custom_folder, bg=self.c_emerald, fg=self.c_emerald_fg, padx=8, pady=3).pack(side="right")
+
+            customs = load_config().get("customFolders", [])
+            if not customs:
+                tk.Label(self.settings_paths_frame, text="No custom game folders added yet.", bg=self.c_card, fg=self.c_muted, font=("Sans", 9), anchor="w").pack(fill="x")
+            else:
+                for cf in customs:
+                    r = tk.Frame(self.settings_paths_frame, bg=self.c_surface2, padx=10, pady=5)
+                    r.pack(fill="x", pady=2)
+                    tk.Label(r, text=cf, bg=self.c_surface2, fg=self.c_text, font=("Monospace", 9), anchor="w").pack(side="left", fill="x", expand=True)
+                    self._make_btn(r, "Remove", lambda p=cf: self._remove_custom_folder(p), bg=self.c_red, fg="#ffffff", padx=8, pady=2).pack(side="right")
+
+        # --------------------------------------------------------------------
+        # TAB 5: ABOUT
+        # --------------------------------------------------------------------
+        def _build_about_pane(self, parent):
+            wrap = tk.Frame(parent, bg=self.c_bg, padx=22, pady=18)
+            wrap.pack(fill="both", expand=True)
+
+            card = tk.Frame(wrap, bg=self.c_card, highlightbackground=self.c_border, highlightthickness=1, padx=20, pady=20)
+            card.pack(fill="both", expand=True)
+
+            tk.Label(card, text=f"HelixSR Manager v{APP_VERSION}", bg=self.c_card, fg=self.c_text, font=("Sans", 18, "bold"), anchor="w").pack(fill="x")
+            tk.Label(
+                card,
+                text=f"Bundled HelixSR Core v{CORE_VERSION} · Standalone Native Linux & SteamOS Desktop Application",
+                bg=self.c_card,
+                fg=self.c_emerald,
+                font=("Sans", 10, "bold"),
+                anchor="w",
+            ).pack(fill="x", pady=(2, 14))
+
+            about_text = (
+                "HelixSR runs NVIDIA's DLSS Super Resolution (Model E convolutional autoencoder) on AMD RDNA 2 / RDNA 3 / RDNA 4 "
+                "and any Vulkan / DirectX 12 GPU through Proton/Wine and native DX12.\n\n"
+                "Supported Installation Routes:\n"
+                "• OptiScaler Proxy (Recommended): Hooks DLSS / XeSS / FSR inputs via dxgi.dll and routes upscaling to HelixSR.\n"
+                "• Direct FSR 3.1 Swap: Replaces amd_fidelityfx_dx12.dll / amd_fidelityfx_upscaler_dx12.dll directly in FSR 3.1 games.\n"
+                "• DLSS Loader (Experimental): Uses HelixSR's native DLSS loader (dxgi.dll + nvngx.dll) without OptiScaler.\n\n"
+                "SteamOS & Linux Quick Start:\n"
+                "1. Open 'Engine & Weights' and click 'Build HelixSR Network' once to compile the neural weights & RDNA shaders.\n"
+                "2. Select any game in 'Games Library' and click 'Install HelixSR'.\n"
+                "3. Copy the displayed Proton Launch Option into Steam -> Game Properties -> Launch Options."
+            )
+            tk.Label(card, text=about_text, bg=self.c_card, fg=self.c_muted, font=("Sans", 10), justify="left", anchor="nw", wraplength=780).pack(fill="x")
+
+        # --------------------------------------------------------------------
+        # ACTIONS, SHORTCUTS & PERIODIC POLLING
+        # --------------------------------------------------------------------
+        def _initial_load(self):
+            self._rescan_games()
+            self._refresh_core_ui()
+
+        def _rescan_games(self, keep_selection=False):
+            prev_folder = self.selected_game["folder"] if (keep_selection and self.selected_game) else None
+            self.all_games = scan_all_games()
+            self._apply_game_filters()
+            if prev_folder:
+                for i, g in enumerate(self.filtered_games):
+                    if canonical_key(g["folder"]) == canonical_key(prev_folder):
+                        self._select_game(g, i)
+                        break
+
+        def _prompt_add_custom_folder(self):
+            folder = filedialog.askdirectory(title="Select Game Installation Folder")
+            if folder and os.path.isdir(folder):
                 cfg = load_config()
-                if fp not in cfg["customFolders"]:
-                    cfg["customFolders"].append(fp)
+                norm = normalize_path(folder)
+                if norm not in cfg["customFolders"]:
+                    cfg["customFolders"].append(norm)
                     save_config(cfg)
-                return self._send_json(200, {"success": True, "games": scan_all_games()})
+                self._rescan_games()
+                self._refresh_settings_ui()
+                self._show_toast(f"Added game folder: {os.path.basename(norm)}")
 
-            if pathname == "/api/core/build":
-                return self._send_json(200, start_network_build(body.get("dlssPath", ""), bool(body.get("wave64"))))
+        def _remove_custom_folder(self, folder_path):
+            cfg = load_config()
+            if folder_path in cfg.get("customFolders", []):
+                cfg["customFolders"].remove(folder_path)
+                save_config(cfg)
+            self._rescan_games()
+            self._refresh_settings_ui()
+            self._show_toast("Removed custom game folder.")
 
-        except Exception as e:
-            return self._send_json(500, {"success": False, "error": str(e)})
+        def _install_all_games(self):
+            st = get_core_status()
+            if not st["weightsBuilt"]:
+                self._show_toast("Please build the HelixSR Network first in 'Engine & Weights'!", is_error=True)
+                self._switch_tab("core")
+                return
+            installed_count = 0
+            for g in self.all_games:
+                if not g.get("installed") and g.get("route"):
+                    try:
+                        install_helixsr(g["folder"])
+                        installed_count += 1
+                    except Exception:
+                        pass
+            self._rescan_games(keep_selection=True)
+            self._show_toast(f"Installed HelixSR in {installed_count} game(s)!")
 
-        return self._send_json(404, {"error": "Not found"})
+        def _uninstall_all_games(self):
+            restored_count = 0
+            for g in self.all_games:
+                if g.get("installed"):
+                    try:
+                        uninstall_helixsr(g["folder"])
+                        restored_count += 1
+                    except Exception:
+                        pass
+            self._rescan_games(keep_selection=True)
+            self._show_toast(f"Restored original files in {restored_count} game(s).")
 
+        def _toggle_theme(self):
+            self.is_light = not self.is_light
+            cfg = load_config()
+            cfg["lightTheme"] = self.is_light
+            save_config(cfg)
+            self._apply_palette()
+            self._build_layout()
+            self._render_games()
+            self._refresh_core_ui()
 
-def is_flatpak_app_installed(app_id):
-    home = os.path.expanduser("~")
-    candidates = [
-        f"/var/lib/flatpak/exports/bin/{app_id}",
-        os.path.join(home, ".local", "share", "flatpak", "exports", "bin", app_id),
-        f"/var/lib/flatpak/app/{app_id}",
-        os.path.join(home, ".local", "share", "flatpak", "app", app_id),
-    ]
-    return any(os.path.exists(c) for c in candidates)
+        def _toggle_handheld_mode(self, force_state=None):
+            if force_state is not None:
+                self.is_handheld_mode = bool(force_state)
+            else:
+                self.is_handheld_mode = not self.is_handheld_mode
+            try:
+                self.root.attributes("-fullscreen", self.is_handheld_mode)
+            except Exception:
+                pass
+            if self.is_handheld_mode:
+                self.legend_bar.pack(side="bottom", fill="x", before=self.main_wrap)
+            else:
+                self.legend_bar.pack_forget()
 
+        def _bind_shortcuts(self):
+            self.root.bind("<F11>", lambda _e: self._toggle_handheld_mode())
+            self.root.bind("<F5>", lambda _e: self._rescan_games(keep_selection=True))
+            self.root.bind("<Escape>", lambda _e: self._close_drawer() if self.selected_game else None)
+            self.root.bind("<Down>", lambda _e: self._move_focus(1))
+            self.root.bind("<Right>", lambda _e: self._move_focus(1))
+            self.root.bind("<Up>", lambda _e: self._move_focus(-1))
+            self.root.bind("<Left>", lambda _e: self._move_focus(-1))
+            self.root.bind("<Return>", lambda _e: self._activate_focused())
 
-def _try_spawn_browser(cmd, env, wait_sec=0.35):
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
-        deadline = time.monotonic() + wait_sec
-        while time.monotonic() < deadline:
-            rc = proc.poll()
-            if rc is not None:
-                return rc == 0
-            time.sleep(0.05)
-        return True
-    except Exception:
-        return False
+        def _move_focus(self, delta):
+            if self.current_tab != "games" or not self.filtered_games:
+                return
+            self.focused_index = max(0, min(len(self.filtered_games) - 1, self.focused_index + delta))
+            self._render_games()
 
+        def _activate_focused(self):
+            if self.current_tab == "games" and 0 <= self.focused_index < len(self.filtered_games):
+                self._select_game(self.filtered_games[self.focused_index], self.focused_index)
 
-def open_desktop_window(url):
-    env = get_clean_desktop_env()
-    search_path = env.get("PATH")
+        def _periodic_tick(self):
+            # 1. Check single-instance wakeup flag so clicking .desktop again focuses this window
+            if os.name != "nt":
+                wakeup_path = os.path.join(get_data_dir(), "wakeup.flag")
+                if os.path.isfile(wakeup_path):
+                    try:
+                        os.remove(wakeup_path)
+                    except Exception:
+                        pass
+                    try:
+                        self.root.deiconify()
+                        self.root.lift()
+                        self.root.focus_force()
+                    except Exception:
+                        pass
 
-    # 1. Native Chromium-family browsers in chromeless desktop app mode
-    native_chromium = [
-        "chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
-        "brave-browser", "brave", "microsoft-edge", "microsoft-edge-stable",
-        "vivaldi", "vivaldi-stable",
-    ]
-    for b in native_chromium:
-        exe = shutil.which(b, path=search_path)
-        if exe and _try_spawn_browser([exe, f"--app={url}", "--window-size=1320,850"], env):
-            return
+            # 2. Drain live build logs into console
+            updated_logs = False
+            while self.build_log_queue:
+                line = self.build_log_queue.pop(0)
+                if hasattr(self, "txt_build_console") and self.txt_build_console.winfo_exists():
+                    self.txt_build_console.insert("end", line + "\n")
+                    self.txt_build_console.see("end")
+                updated_logs = True
 
-    # 2. Flatpak Chromium-family browsers (standard on SteamOS / Bazzite) in chromeless app mode
-    flatpak_exe = shutil.which("flatpak", path=search_path)
-    flatpak_chromium = [
-        "com.google.Chrome",
-        "org.chromium.Chromium",
-        "com.brave.Browser",
-        "com.microsoft.Edge",
-        "io.github.ungoogled_software.ungoogled_chromium",
-        "com.vivaldi.Vivaldi",
-    ]
-    if flatpak_exe:
-        for app_id in flatpak_chromium:
-            if is_flatpak_app_installed(app_id):
-                if _try_spawn_browser([flatpak_exe, "run", app_id, f"--app={url}", "--window-size=1320,850"], env):
-                    return
+            if updated_logs or IS_BUILDING:
+                self._refresh_core_ui()
+                if not IS_BUILDING and updated_logs:
+                    self._rescan_games(keep_selection=True)
 
-    in_gamescope = (
-        env.get("XDG_CURRENT_DESKTOP", "").lower() == "gamescope"
-        or env.get("SteamGamepadUI") == "1"
-    )
+            self.root.after(250, self._periodic_tick)
 
-    def try_firefox_fallbacks():
-        if flatpak_exe:
-            for ff_id in ("org.mozilla.firefox", "app.zen_browser.zen", "io.gitlab.librewolf-community", "net.waterfox.waterfox"):
-                if is_flatpak_app_installed(ff_id):
-                    if _try_spawn_browser([flatpak_exe, "run", ff_id, url], env):
-                        return True
-        ff_exe = shutil.which("firefox", path=search_path)
-        if ff_exe and _try_spawn_browser([ff_exe, url], env):
-            return True
-        return False
-
-    def try_xdg_fallbacks():
-        for opener in (
-            ["xdg-open", url],
-            ["kioclient5", "exec", url],
-            ["kioclient", "exec", url],
-            ["kde-open5", url],
-            ["gio", "open", url],
-        ):
-            exe = shutil.which(opener[0], path=search_path)
-            if exe and _try_spawn_browser([exe] + opener[1:], env, wait_sec=0.6):
-                return True
-        return False
-
-    # 3. In SteamOS Gaming Mode (gamescope), xdg-open often lacks a portal daemon, so try direct browser first
-    if in_gamescope:
-        if try_firefox_fallbacks() or try_xdg_fallbacks():
-            return
-    else:
-        if try_xdg_fallbacks() or try_firefox_fallbacks():
-            return
-
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
-
-
-def _is_port_in_use(port):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(("127.0.0.1", port)) == 0
-
-
-def _probe_existing_instance(port):
-    try:
-        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/core/status")
-        with urllib.request.urlopen(req, timeout=0.8) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if isinstance(data, dict) and "appVersion" in data:
-                return data
-    except Exception:
-        pass
-    return None
-
-
-def _shutdown_existing_instance(port):
-    try:
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{port}/api/shutdown",
-            data=b"{}",
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=0.8) as _resp:
-            pass
-        deadline = time.monotonic() + 1.5
-        while time.monotonic() < deadline:
-            if not _is_port_in_use(port):
-                return True
-            time.sleep(0.05)
-    except Exception:
-        pass
-    return not _is_port_in_use(port)
+    root = tk.Tk()
+    HelixSRStandaloneApp(root)
+    root.mainloop()
 
 
 def main():
@@ -2009,41 +3229,17 @@ def main():
             print(f"- {g['name']} [{g['launcher']}] -> {status} ({g['folder']})")
         return
 
-    port = 4280
-    if _is_port_in_use(port):
-        existing = _probe_existing_instance(port)
-        if existing is not None:
-            if existing.get("isBuilding"):
-                url = f"http://127.0.0.1:{port}"
-                print(f"[HelixSR Manager] Reconnecting to active instance on {url}")
-                if "--no-browser" not in sys.argv:
-                    open_desktop_window(url)
-                return
-            if not _shutdown_existing_instance(port):
-                url = f"http://127.0.0.1:{port}"
-                print(f"[HelixSR Manager] Opening existing instance on {url}")
-                if "--no-browser" not in sys.argv:
-                    open_desktop_window(url)
-                return
+    smoke_ms = 0
+    for arg in sys.argv[1:]:
+        if arg.startswith("--smoke-test="):
+            try:
+                smoke_ms = int(arg.split("=", 1)[1])
+            except Exception:
+                smoke_ms = 500
 
-    for p in range(4280, 4310):
-        if not _is_port_in_use(p):
-            port = p
-            break
-
-    ThreadingHTTPServer.allow_reuse_address = True
-    server = ThreadingHTTPServer(("127.0.0.1", port), SwapperRequestHandler)
-    url = f"http://127.0.0.1:{port}"
-    print(f"[HelixSR Manager] Running on {url} (Press Ctrl+C to quit)")
-    if "--no-browser" not in sys.argv:
-        threading.Timer(0.4, lambda: open_desktop_window(url)).start()
-
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n[HelixSR Manager] Shutting down cleanly.")
-        server.server_close()
+    run_standalone_gui(smoke_test_ms=smoke_ms)
 
 
 if __name__ == "__main__":
     main()
+

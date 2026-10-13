@@ -152,10 +152,12 @@ function Set-ZipUnixPermissions($zipPath) {
             $fnLen = [System.BitConverter]::ToUInt16($hdr, 28)
             $extraLen = [System.BitConverter]::ToUInt16($hdr, 30)
             $commentLen = [System.BitConverter]::ToUInt16($hdr, 32)
+            $localHdrOffset = [System.BitConverter]::ToUInt32($hdr, 42)
 
             $fnBytes = New-Object byte[] $fnLen
             [void]$fs.Read($fnBytes, 0, $fnLen)
             $entryName = [System.Text.Encoding]::UTF8.GetString($fnBytes).Replace('\', '/')
+            $normFnBytes = [System.Text.Encoding]::UTF8.GetBytes($entryName)
 
             # VersionMadeBy: spec 2.0 (20), host OS = Unix (3)
             $hdr[4] = 20
@@ -178,8 +180,14 @@ function Set-ZipUnixPermissions($zipPath) {
                 $hdr[38] = 0x00; $hdr[39] = 0x00; $hdr[40] = 0xA4; $hdr[41] = 0x81
             }
 
+            # Write updated Central Directory header + normalized forward-slash filename
             $fs.Seek($pos, 'Begin') | Out-Null
             $fs.Write($hdr, 0, 46)
+            $fs.Write($normFnBytes, 0, $fnLen)
+
+            # Also normalize the filename in the Local File Header (offset + 30)
+            $fs.Seek([int64]$localHdrOffset + 30, 'Begin') | Out-Null
+            $fs.Write($normFnBytes, 0, $fnLen)
 
             $pos += 46 + $fnLen + $extraLen + $commentLen
         }

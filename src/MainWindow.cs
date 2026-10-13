@@ -3723,15 +3723,49 @@ namespace HelixSRSwapper
         {
             if (_cmbDlssSource == null) return;
             _cmbDlssSource.Items.Clear();
-            _cmbDlssSource.Items.Add("Download automatically from NVIDIA GitHub");
+            _cmbDlssSource.Items.Add("Download automatically from NVIDIA GitHub (Recommended)");
             foreach (var g in _allGames)
             {
-                if (!string.IsNullOrEmpty(g.FoundNvngxDlssPath))
+                if (!string.IsNullOrEmpty(g.FoundNvngxDlssPath) && File.Exists(g.FoundNvngxDlssPath))
                 {
-                    _cmbDlssSource.Items.Add(string.Format("Use from {0} ({1})", g.Name, g.FoundNvngxDlssPath));
+                    try
+                    {
+                        var fi = new FileInfo(g.FoundNvngxDlssPath);
+                        // DLSS 3+ with network weights is typically >= 40MB
+                        if (fi.Length >= 40 * 1024 * 1024)
+                        {
+                            _cmbDlssSource.Items.Add(string.Format("Use from {0} ({1})", g.Name, g.FoundNvngxDlssPath));
+                        }
+                    }
+                    catch { }
                 }
             }
-            _cmbDlssSource.SelectedIndex = _cmbDlssSource.Items.Count > 1 ? 1 : 0;
+            _cmbDlssSource.SelectedIndex = 0;
+        }
+
+        private static string CleanPowerShellError(string data)
+        {
+            if (string.IsNullOrWhiteSpace(data)) return null;
+            if (data.StartsWith("#< CLIXML", StringComparison.OrdinalIgnoreCase)) return null;
+            if (data.StartsWith("<Objs ", StringComparison.OrdinalIgnoreCase) || data.StartsWith("<Obj ", StringComparison.OrdinalIgnoreCase))
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(data, @"<ToString>(.*?)</ToString>");
+                if (m.Success && !string.IsNullOrWhiteSpace(m.Groups[1].Value))
+                {
+                    return System.Net.WebUtility.HtmlDecode(m.Groups[1].Value);
+                }
+                var mMsg = System.Text.RegularExpressions.Regex.Match(data, @"<S N=""Message"">(.*?)</S>");
+                if (mMsg.Success && !string.IsNullOrWhiteSpace(mMsg.Groups[1].Value))
+                {
+                    return System.Net.WebUtility.HtmlDecode(mMsg.Groups[1].Value);
+                }
+                return null;
+            }
+            if (data.TrimStart().StartsWith("<") && data.TrimEnd().EndsWith(">"))
+            {
+                return null;
+            }
+            return data;
         }
 
         private void UpdateGpuInfo()
@@ -3750,11 +3784,8 @@ namespace HelixSRSwapper
             _txtCompileConsole.Text = "Starting HelixSR Network compiler...\n";
 
             string ps1 = Path.Combine(Engine.CoreDir, "helixsr-setup.ps1");
-            // HelixSR 1.8+ setup: -BuildOnly no longer exists; the game step that follows the build reads stdin, which is
-            // closed below, so it exits right away (EOF) and the Manager handles the game installs itself.
-            // Both wave sizes are always built since 1.8.0, so -Wave64 is not needed.
             var psScript = new System.Text.StringBuilder();
-            psScript.Append("& '").Append(ps1.Replace("'", "''")).Append("' -Yes -Rebuild");
+            psScript.Append("try { & '").Append(ps1.Replace("'", "''")).Append("' -Yes -Rebuild");
 
             if (_cmbDlssSource.SelectedIndex > 0)
             {
@@ -3767,6 +3798,8 @@ namespace HelixSRSwapper
                     psScript.Append(" -Dlss '").Append(dlss.Replace("'", "''")).Append("'");
                 }
             }
+
+            psScript.Append(" *>&1 } catch { Write-Host $_; exit 1 }; if (-not $?) { exit 1 }");
 
             string encodedCommand = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(psScript.ToString()));
 
@@ -3782,11 +3815,12 @@ namespace HelixSRSwapper
                 CreateNoWindow = true
             };
             startInfo.EnvironmentVariables["PYTHONUNBUFFERED"] = "1";
+            startInfo.EnvironmentVariables["HELIXSR_BUILD_ONLY"] = "1";
 
             var proc = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             _compileProc = proc;
 
-            // Once upstream's interactive game step starts, its prompts are irrelevant here: hide them
+            // Once upstream's interactive game step starts (if any), hide prompts
             bool[] installerPhase = new bool[] { false };
 
             proc.OutputDataReceived += delegate(object s, DataReceivedEventArgs e)
@@ -3820,10 +3854,12 @@ namespace HelixSRSwapper
             {
                 if (!string.IsNullOrEmpty(e.Data) && !_isClosing)
                 {
+                    string cleaned = CleanPowerShellError(e.Data);
+                    if (string.IsNullOrWhiteSpace(cleaned)) return;
                     Dispatcher.BeginInvoke(new Action(delegate
                     {
                         if (_isClosing) return;
-                        _txtCompileConsole.AppendText("[ERR] " + e.Data + "\n");
+                        _txtCompileConsole.AppendText("[ERR] " + cleaned + "\n");
                         _txtCompileConsole.ScrollToEnd();
                     }));
                 }
@@ -3831,6 +3867,8 @@ namespace HelixSRSwapper
 
             proc.Exited += delegate
             {
+                int exitCode = -1;
+                try { exitCode = proc.ExitCode; } catch { }
                 Interlocked.CompareExchange(ref _compileProc, null, proc);
                 try { proc.Dispose(); } catch { }
                 if (_isClosing) return;
@@ -3838,16 +3876,25 @@ namespace HelixSRSwapper
                 {
                     if (_isClosing) return;
                     _btnStartBuild.IsEnabled = true;
-                    _txtCompileConsole.AppendText("\nCompilation process finished.\n");
                     UpdateCoreStatus();
-                    int synced = Engine.SyncHelixSRToInstalledGames();
-                    if (synced > 0)
+                    var status = Engine.GetCoreStatus();
+                    if (exitCode == 0 && status.HasNetwork)
                     {
-                        _txtCompileConsole.AppendText(string.Format("Auto-synced the rebuilt HelixSR DLL to {0} installed game(s).\n", synced));
-                        _txtCompileConsole.ScrollToEnd();
-                        RefreshGames();
+                        _txtCompileConsole.AppendText("\nHelixSR Network compilation succeeded!\n");
+                        int synced = Engine.SyncHelixSRToInstalledGames();
+                        if (synced > 0)
+                        {
+                            _txtCompileConsole.AppendText(string.Format("Auto-synced the rebuilt HelixSR DLL to {0} installed game(s).\n", synced));
+                            RefreshGames();
+                        }
+                        ShowToast("Network compilation finished");
                     }
-                    ShowToast("Network compilation finished");
+                    else
+                    {
+                        _txtCompileConsole.AppendText("\nCompilation process exited with code " + exitCode + ". Check output above for errors.\n");
+                        ShowToast("Network compilation failed (exit " + exitCode + ")");
+                    }
+                    _txtCompileConsole.ScrollToEnd();
                 }));
             };
 

@@ -16,6 +16,7 @@ param(
     [switch]$Yes,
     [switch]$Rebuild,
     [switch]$Wave64,
+    [switch]$BuildOnly,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$Folders = @()
 )
 $Target = $PSScriptRoot
@@ -100,13 +101,15 @@ try {
     }
 
     # --- games ---
-    $inst = @((Resolve-Path $Target).Path)
-    foreach ($f in $Folders) {
-        if (-not (Test-Path $f -PathType Container)) { throw "not a folder: $f" }
-        $inst += @('--folder', (Resolve-Path $f).Path)
+    if ($env:HELIXSR_BUILD_ONLY -ne '1' -and -not $BuildOnly) {
+        $inst = @((Resolve-Path $Target).Path)
+        foreach ($f in $Folders) {
+            if (-not (Test-Path $f -PathType Container)) { throw "not a folder: $f" }
+            $inst += @('--folder', (Resolve-Path $f).Path)
+        }
+        & $Py (Join-Path $Here 'setup\helixsr_install.py') @inst
+        if ($LASTEXITCODE -ne 0) { throw "game setup failed (exit $LASTEXITCODE)" }
     }
-    & $Py (Join-Path $Here 'setup\helixsr_install.py') @inst
-    if ($LASTEXITCODE -ne 0) { throw "game setup failed (exit $LASTEXITCODE)" }
 }
 catch {
     Write-Host "[helixsr-setup] error: $_" -ForegroundColor Red

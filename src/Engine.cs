@@ -92,7 +92,7 @@ namespace HelixSRSwapper
         private static bool IsCoreDirectoryComplete(string dir)
         {
             if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return false;
-            string marker = Path.Combine(dir, ".extracted_" + CoreVersion);
+            string marker = Path.Combine(dir, ".extracted_" + CoreVersion + "_r2");
             if (!File.Exists(marker)) return false;
             if (!File.Exists(Path.Combine(dir, DllFsr))) return false;
             if (!File.Exists(Path.Combine(dir, "optiscaler", "OptiScaler.dll"))) return false;
@@ -134,13 +134,19 @@ namespace HelixSRSwapper
                             Directory.CreateDirectory(destDir);
                         }
 
+                        if (destPath.EndsWith(DllFsr, StringComparison.OrdinalIgnoreCase) && File.Exists(destPath) && HasEmbeddedNetwork(destPath))
+                        {
+                            // If user already compiled the network into amd_fidelityfx_dx12.dll, preserve it!
+                            continue;
+                        }
+
                         entry.ExtractToFile(destPath, true);
                     }
                 }
 
                 try
                 {
-                    string marker = Path.Combine(targetDir, ".extracted_" + CoreVersion);
+                    string marker = Path.Combine(targetDir, ".extracted_" + CoreVersion + "_r2");
                     File.WriteAllText(marker, string.Format("HelixSR Core {0} extracted at {1} UTC", CoreVersion, DateTime.UtcNow.ToString("o")));
                 }
                 catch { }
@@ -801,7 +807,27 @@ namespace HelixSRSwapper
                     if (lower == "nvngx_dlss.dll")
                     {
                         inputs.Add("DLSS");
-                        game.FoundNvngxDlssPath = f;
+                        try
+                        {
+                            if (string.IsNullOrEmpty(game.FoundNvngxDlssPath))
+                            {
+                                game.FoundNvngxDlssPath = f;
+                            }
+                            else
+                            {
+                                // Prefer the larger DLSS DLL if multiple exist in the game directory (e.g. root game vs SP/MP subfolder)
+                                var fiNew = new FileInfo(f);
+                                var fiOld = new FileInfo(game.FoundNvngxDlssPath);
+                                if (fiNew.Length > fiOld.Length)
+                                {
+                                    game.FoundNvngxDlssPath = f;
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            if (string.IsNullOrEmpty(game.FoundNvngxDlssPath)) game.FoundNvngxDlssPath = f;
+                        }
                     }
                     else if (lower == "nvngx_dlssg.dll" || lower == "sl.dlss_g.dll")
                     {

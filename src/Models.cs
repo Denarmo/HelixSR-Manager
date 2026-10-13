@@ -84,6 +84,7 @@ namespace HelixSRSwapper
         public bool CoreExists { get; set; }
         public bool WeightsBuilt { get; set; }
         public bool NetworkEmbedded { get; set; } // HelixSR 1.8+: network appended to amd_fidelityfx_dx12.dll
+        public bool HasNetwork { get { return NetworkEmbedded || WeightsBuilt; } }
         public long WeightsSize { get; set; }
         public long KernelsSize { get; set; }
         public long DllSize { get; set; }

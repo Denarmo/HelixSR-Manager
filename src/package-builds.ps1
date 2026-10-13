@@ -75,8 +75,10 @@ if (Test-Path (Join-Path $RootDir "LICENSE")) {
     Copy-Item -Path (Join-Path $RootDir "LICENSE") -Destination (Join-Path $WinBuild "LICENSE") -Force
 }
 
-$WinCoreDst = Join-Path $WinBuild "helixsr_core\HelixSR-$CoreVersion"
-Copy-Core $WinCoreDst
+# HelixSR-Manager.exe is now 100% standalone with all necessary core files embedded inside the binary.
+if (Test-Path (Join-Path $WinBuild "helixsr_core")) {
+    Remove-Item -Path (Join-Path $WinBuild "helixsr_core") -Recurse -Force
+}
 
 # ---------------------------------------------------------
 # 2. Populate build\linux (SteamOS / Linux)

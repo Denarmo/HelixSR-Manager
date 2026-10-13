@@ -23,6 +23,12 @@ namespace HelixSRSwapper
 
             try
             {
+                Engine.EnsureCoreReady();
+            }
+            catch { }
+
+            try
+            {
                 var app = new Application
                 {
                     ShutdownMode = ShutdownMode.OnMainWindowClose

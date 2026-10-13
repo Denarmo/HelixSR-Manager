@@ -2,6 +2,13 @@
 setlocal
 cd /d "%~dp0"
 
+echo [HelixSR Manager] Preparing clean core bundle for standalone embedding...
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0src\prepare-core.ps1"
+if %errorlevel% neq 0 (
+    echo [ERROR] Preparing embedded core bundle failed.
+    exit /b %errorlevel%
+)
+
 echo [HelixSR Manager] Compiling native standalone HelixSR-Manager.exe...
 
 set "NETDIR=C:\Windows\Microsoft.NET\Framework64\v4.0.30319"
@@ -17,6 +24,7 @@ if not exist "%CSC%" (
 taskkill /F /IM HelixSR-Manager.exe /T >nul 2>&1
 
 "%CSC%" /nologo /target:winexe /win32icon:src\app.ico /out:HelixSR-Manager.exe ^
+  /resource:build\helixsr_core.zip,HelixSR.Core.zip ^
   /r:"%NETDIR%\System.dll" ^
   /r:"%NETDIR%\System.Core.dll" ^
   /r:"%NETDIR%\System.IO.Compression.dll" ^

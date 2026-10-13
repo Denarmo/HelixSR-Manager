@@ -18,19 +18,132 @@ namespace HelixSRSwapper
         /// <summary>Bundled upstream HelixSR core version (helixsr_core/HelixSR-x.y.z).</summary>
         public const string CoreVersion = "1.8.1";
 
+        public const string EmbeddedCoreResourceName = "HelixSR.Core.zip";
+        private static readonly object CoreExtractLock = new object();
+        private static string _resolvedCoreDir = null;
+
         public static string CoreDir
         {
             get
             {
-                string coreFolder = "HelixSR-" + CoreVersion;
-                string asmDir = Path.GetDirectoryName(typeof(Engine).Assembly.Location);
-                string p1 = Path.Combine(asmDir, "helixsr_core", coreFolder);
-                if (Directory.Exists(p1)) return Path.GetFullPath(p1);
+                if (_resolvedCoreDir != null && Directory.Exists(_resolvedCoreDir))
+                    return _resolvedCoreDir;
 
-                string p2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "helixsr_core", coreFolder);
-                if (Directory.Exists(p2)) return Path.GetFullPath(p2);
+                lock (CoreExtractLock)
+                {
+                    if (_resolvedCoreDir != null && Directory.Exists(_resolvedCoreDir))
+                        return _resolvedCoreDir;
 
-                return Path.GetFullPath(p1);
+                    string coreFolder = "HelixSR-" + CoreVersion;
+
+                    // 1. Check local directory adjacent to the assembly
+                    try
+                    {
+                        string asmDir = Path.GetDirectoryName(typeof(Engine).Assembly.Location);
+                        if (!string.IsNullOrEmpty(asmDir))
+                        {
+                            string p1 = Path.Combine(asmDir, "helixsr_core", coreFolder);
+                            if (Directory.Exists(p1) && File.Exists(Path.Combine(p1, DllFsr)))
+                            {
+                                _resolvedCoreDir = Path.GetFullPath(p1);
+                                return _resolvedCoreDir;
+                            }
+                        }
+                    }
+                    catch { }
+
+                    // 2. Check local directory in BaseDirectory
+                    try
+                    {
+                        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                        if (!string.IsNullOrEmpty(baseDir))
+                        {
+                            string p2 = Path.Combine(baseDir, "helixsr_core", coreFolder);
+                            if (Directory.Exists(p2) && File.Exists(Path.Combine(p2, DllFsr)))
+                            {
+                                _resolvedCoreDir = Path.GetFullPath(p2);
+                                return _resolvedCoreDir;
+                            }
+                        }
+                    }
+                    catch { }
+
+                    // 3. Fall back to LocalAppData/HelixSR/core/HelixSR-1.8.1
+                    string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                    string appDataCore = Path.Combine(localApp, "HelixSR", "core", coreFolder);
+
+                    EnsureCoreExtracted(appDataCore);
+
+                    _resolvedCoreDir = Path.GetFullPath(appDataCore);
+                    return _resolvedCoreDir;
+                }
+            }
+        }
+
+        public static void EnsureCoreReady()
+        {
+            try
+            {
+                string ignored = CoreDir;
+            }
+            catch { }
+        }
+
+        private static bool IsCoreDirectoryComplete(string dir)
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return false;
+            string marker = Path.Combine(dir, ".extracted_" + CoreVersion);
+            if (!File.Exists(marker)) return false;
+            if (!File.Exists(Path.Combine(dir, DllFsr))) return false;
+            if (!File.Exists(Path.Combine(dir, "optiscaler", "OptiScaler.dll"))) return false;
+            if (!File.Exists(Path.Combine(dir, "setup", "helixsr_setup.py"))) return false;
+            if (!File.Exists(Path.Combine(dir, "helixsr-setup.ps1"))) return false;
+            return true;
+        }
+
+        public static void EnsureCoreExtracted(string targetDir)
+        {
+            if (IsCoreDirectoryComplete(targetDir)) return;
+
+            var asm = typeof(Engine).Assembly;
+            using (var stream = asm.GetManifestResourceStream(EmbeddedCoreResourceName))
+            {
+                if (stream == null)
+                {
+                    if (!Directory.Exists(targetDir)) Directory.CreateDirectory(targetDir);
+                    return;
+                }
+
+                if (!Directory.Exists(targetDir)) Directory.CreateDirectory(targetDir);
+
+                using (var archive = new ZipArchive(stream, ZipArchiveMode.Read))
+                {
+                    foreach (var entry in archive.Entries)
+                    {
+                        if (string.IsNullOrEmpty(entry.Name) && (entry.FullName.EndsWith("/") || entry.FullName.EndsWith("\\")))
+                        {
+                            string dirPath = Path.Combine(targetDir, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+                            if (!Directory.Exists(dirPath)) Directory.CreateDirectory(dirPath);
+                            continue;
+                        }
+
+                        string destPath = Path.Combine(targetDir, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+                        string destDir = Path.GetDirectoryName(destPath);
+                        if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
+                        {
+                            Directory.CreateDirectory(destDir);
+                        }
+
+                        entry.ExtractToFile(destPath, true);
+                    }
+                }
+
+                try
+                {
+                    string marker = Path.Combine(targetDir, ".extracted_" + CoreVersion);
+                    File.WriteAllText(marker, string.Format("HelixSR Core {0} extracted at {1} UTC", CoreVersion, DateTime.UtcNow.ToString("o")));
+                }
+                catch { }
             }
         }
         private const string DllFsr = "amd_fidelityfx_dx12.dll";

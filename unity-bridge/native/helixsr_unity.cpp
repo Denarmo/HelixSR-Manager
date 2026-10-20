@@ -15,6 +15,7 @@
 #include <d3dcommon.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <math.h>
 #include "helixsr_unity.h"
 
 namespace
@@ -116,6 +117,50 @@ namespace
 
     int g_lastRenderW = 0, g_lastRenderH = 0, g_lastOutW = 0, g_lastOutH = 0, g_frames = 0;
 
+    float HalfToFloat(uint16_t h)
+    {
+        uint32_t sign = (h >> 15) & 1, exp = (h >> 10) & 0x1f, man = h & 0x3ff;
+        float v;
+        if (exp == 0) v = (float)man * (1.0f / (1 << 24));           // zero and subnormals
+        else if (exp == 31) v = 65504.0f;                            // inf/nan, clamp
+        else v = (1.0f + man / 1024.0f) * (float)(1 << (exp > 15 ? exp - 15 : 0)) / (float)(1 << (exp < 15 ? 15 - exp : 0));
+        return sign ? -v : v;
+    }
+
+    // Reads the motion-vector texture back (slow, diagnostic only) and logs how much of it is non-zero. A camera-only
+    // scene still has non-zero vectors everywhere while the camera moves; objects that move on their own show up as
+    // a small non-zero region when the camera is still.
+    void LogMotionStats(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11Texture2D* motion, const HelixSREvaluateParams* p)
+    {
+        D3D11_TEXTURE2D_DESC d;
+        motion->GetDesc(&d);
+        if (d.SampleDesc.Count != 1 || (d.Format != DXGI_FORMAT_R16G16_TYPELESS && d.Format != DXGI_FORMAT_R16G16_FLOAT))
+        {
+            Log("  motion stats skipped: format %u samples %u", (unsigned)d.Format, d.SampleDesc.Count);
+            return;
+        }
+        d.Usage = D3D11_USAGE_STAGING; d.BindFlags = 0; d.MiscFlags = 0; d.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        Ref<ID3D11Texture2D> stg;
+        if (FAILED(dev->CreateTexture2D(&d, nullptr, stg.put()))) { Log("  motion stats: staging texture failed"); return; }
+        ctx->CopyResource(stg.p, motion);
+        D3D11_MAPPED_SUBRESOURCE m;
+        if (FAILED(ctx->Map(stg.p, 0, D3D11_MAP_READ, 0, &m))) { Log("  motion stats: map failed"); return; }
+        double sum = 0; float maxMag = 0; unsigned long long nonzero = 0, total = (unsigned long long)d.Width * d.Height;
+        for (UINT y = 0; y < d.Height; ++y)
+        {
+            const uint16_t* row = (const uint16_t*)((const uint8_t*)m.pData + (size_t)y * m.RowPitch);
+            for (UINT x = 0; x < d.Width; ++x)
+            {
+                float mx = HalfToFloat(row[x * 2]) * p->mvScaleX, my = HalfToFloat(row[x * 2 + 1]) * p->mvScaleY;
+                float mag = sqrtf(mx * mx + my * my);
+                if (mag > 0.01f) { ++nonzero; sum += mag; if (mag > maxMag) maxMag = mag; }
+            }
+        }
+        ctx->Unmap(stg.p, 0);
+        Log("  motion stats: %.2f%% of texels move, mean %.2f px, max %.2f px (render pixels)",
+            100.0 * nonzero / (double)total, nonzero ? sum / nonzero : 0.0, maxMag);
+    }
+
     void Evaluate(const HelixSREvaluateParams* p)
     {
         if (!p || !p->color || !p->output) return;
@@ -129,6 +174,11 @@ namespace
                 g_frames, p->renderWidth, p->renderHeight, p->outputWidth, p->outputHeight, p->jitterX, p->jitterY, p->mvScaleX, p->mvScaleY, p->reset);
             LogTexture("color", p->color); LogTexture("depth", p->depth); LogTexture("motion", p->motion); LogTexture("output", p->output);
         }
+        // First 64 frames show the jitter sequence; after that one line every 300 frames.
+        bool periodic = g_frames < 64 || g_frames % 300 == 0;
+        if (periodic && g_frames > 0)
+            Log("frame %d: jitter=(%.3f,%.3f) reset=%d", g_frames, p->jitterX, p->jitterY, p->reset);
+        bool stats = p->motion && (g_frames == 60 || (g_frames > 0 && g_frames % 300 == 0));
         ++g_frames;
 
         Ref<ID3D11Device> dev;
@@ -136,6 +186,7 @@ namespace
         if (!dev || !BuildPipeline(dev.p)) return;
         Ref<ID3D11DeviceContext> ctx;
         dev->GetImmediateContext(ctx.put());
+        if (stats) { Log("motion vectors at frame %d:", g_frames - 1); LogMotionStats(dev.p, ctx.p, (ID3D11Texture2D*)p->motion, p); }
 
         D3D11_TEXTURE2D_DESC cd, od;
         color->GetDesc(&cd); output->GetDesc(&od);

@@ -400,6 +400,12 @@ UnityInfo? detectUnity(String exeDir, String? exeName) {
   );
 }
 
+/// Steam's own runtimes, which have manifests but are not games.
+final _steamTool = RegExp(
+  r'^(steamworks common redistributables|steam linux runtime|proton\b|steamvr)',
+  caseSensitive: false,
+);
+
 /// Folders such as "Steam Controller Configs", a mod backup directory, or the
 /// config and cache an uninstalled game leaves behind have no Steam manifest,
 /// no executable and no HelixSR files.
@@ -444,6 +450,14 @@ List<GameInfo> scanAllGames(List<String> customFolders) {
         final g = scanGame(norm, p.basename(norm), manifests);
         if (g.exeFolder != null) scanned.add(canonicalKey(g.exeFolder!));
         if (_isNotAGame(g)) continue;
+        final m = manifests[p.basename(norm).toLowerCase()];
+        // A manifest that is not fully installed and has no executable is a
+        // cancelled or removed download; one mid-update keeps its exe.
+        if (m != null &&
+            ((!m.fullyInstalled && g.exeName == null) ||
+                _steamTool.hasMatch(m.name))) {
+          continue;
+        }
         result.add(g);
       }
     } catch (_) {}

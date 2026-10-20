@@ -214,9 +214,19 @@ class HandheldInfo {
 }
 
 class ManifestInfo {
-  const ManifestInfo(this.appId, this.name, this.installDir, this.libraryRoot);
+  const ManifestInfo(
+    this.appId,
+    this.name,
+    this.installDir,
+    this.libraryRoot, {
+    this.stateFlags = 4,
+  });
   final String appId;
   final String name;
   final String installDir;
   final String libraryRoot;
+
+  /// Steam's StateFlags; bit 4 means fully installed.
+  final int stateFlags;
+  bool get fullyInstalled => stateFlags & 4 != 0;
 }

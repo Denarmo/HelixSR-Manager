@@ -100,11 +100,23 @@ void main() {
     file('Over the Hill Expedition/OverTheHill.exe', 2000);
     File('${tmp.path}/Steam/steamapps/appmanifest_1.acf')
         .writeAsStringSync('"appid" "1" "name" "Over the Hill" "installdir" "Over the Hill"');
+    file('Half/Half.exe', 2000);
+    file('Steamworks Shared/x.exe', 2000);
+    File('${tmp.path}/Steam/steamapps/appmanifest_2.acf').writeAsStringSync(
+        '"appid" "2" "name" "Half" "installdir" "Half" "StateFlags" "1026" "x" "y"');
+    File('${tmp.path}/Steam/steamapps/appmanifest_3.acf').writeAsStringSync(
+        '"appid" "3" "name" "Steamworks Common Redistributables" "installdir" "Steamworks Shared" "StateFlags" "4"');
+    File('${tmp.path}/Steam/steamapps/appmanifest_4.acf').writeAsStringSync(
+        '"appid" "4" "name" "Left Over" "installdir" "LeftOver" "StateFlags" "2"');
+    file('LeftOver/readme.txt', 20);
     steamRootsOverride = ['${tmp.path}/Steam'];
     final names = scanAllGames([]).map((g) => g.name).toList();
     expect(names, containsAll(['HoloCure', 'Over the Hill']));
     expect(names, isNot(contains('Bodycam')));
     expect(names, isNot(contains('Pragmata')));
+    expect(names, contains('Half'));
+    expect(names, isNot(contains('Steamworks Common Redistributables')));
+    expect(names, isNot(contains('Left Over')));
     expect(names, isNot(contains('Over the Hill Expedition')));
   });
 }

@@ -274,6 +274,8 @@ Future<String?> _resolve(GameInfo game, bool hero) async {
 
   final local = findSteamArtwork(id, hero: hero);
   if (local != null) return local;
+  // Steam's own 300x450 cover beats nothing, but not a full-size download.
+  String? lowRes() => hero ? null : findSteamArtwork(id, lowRes: true);
 
   final dir = _coverDir();
   final target = File(
@@ -317,8 +319,10 @@ Future<String?> _resolve(GameInfo game, bool hero) async {
         if (saved != null) return saved;
       }
     }
+    final small = lowRes();
+    if (small != null) return small;
   } else {
-    return fallback.path;
+    return lowRes() ?? fallback.path;
   }
 
   // Landscape fallbacks, cropped by the UI: Steam's own cached header, then

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helixsr_manager/engine/engine.dart';
 import 'package:helixsr_manager/engine/steam.dart' show steamRootsOverride;
+import 'package:path/path.dart' as p;
 
 void main() {
   late Directory tmp;
@@ -28,8 +29,10 @@ void main() {
       GameInfo(id: name, name: name, folder: '/g/$name', appId: appId);
 
   test('name normalisation drops editions and symbols', () {
-    expect(normalizeGameName("Marvel's Spider-Man™ Remastered"),
-        'marvels spider man');
+    expect(
+      normalizeGameName("Marvel's Spider-Man™ Remastered"),
+      'marvels spider man',
+    );
     expect(prettifyFolderName('CyberPunk_2077_v1.2'), 'Cyber Punk 2077');
   });
 
@@ -48,12 +51,14 @@ void main() {
     artworkFetchOverride = (u) async {
       calls.add(u);
       if (u.path.contains('storesearch')) {
-        return utf8.encode(jsonEncode({
-          'items': [
-            {'type': 'app', 'id': 111, 'name': 'Hades II'},
-            {'type': 'app', 'id': 222, 'name': 'Hades'},
-          ],
-        }));
+        return utf8.encode(
+          jsonEncode({
+            'items': [
+              {'type': 'app', 'id': 111, 'name': 'Hades II'},
+              {'type': 'app', 'id': 222, 'name': 'Hades'},
+            ],
+          }),
+        );
       }
       return jpg;
     };
@@ -67,23 +72,31 @@ void main() {
   });
 
   test('unrelated search results are rejected', () async {
-    artworkFetchOverride = (u) async => utf8.encode(jsonEncode({
-          'items': [
-            {'type': 'app', 'id': 9, 'name': 'Totally Different Thing'},
-          ],
-        }));
+    artworkFetchOverride = (u) async => utf8.encode(
+      jsonEncode({
+        'items': [
+          {'type': 'app', 'id': 9, 'name': 'Totally Different Thing'},
+        ],
+      }),
+    );
     expect(await resolveAppId(game('Obscure Indie Game')), isNull);
     expect(await resolveArtwork(game('Obscure Indie Game')), isNull);
   });
 
   test('short title leading a longer Steam title still matches', () async {
-    artworkFetchOverride = (u) async => utf8.encode(jsonEncode({
-          'items': [
-            {'type': 'app', 'id': 5, 'name': 'HoloCure - Save the Fans!'},
-            {'type': 'app', 'id': 6, 'name': 'Holo Something Else'},
-            {'type': 'app', 'id': 7, 'name': 'In Konbini: One Store. Many Stories.'},
-          ],
-        }));
+    artworkFetchOverride = (u) async => utf8.encode(
+      jsonEncode({
+        'items': [
+          {'type': 'app', 'id': 5, 'name': 'HoloCure - Save the Fans!'},
+          {'type': 'app', 'id': 6, 'name': 'Holo Something Else'},
+          {
+            'type': 'app',
+            'id': 7,
+            'name': 'In Konbini: One Store. Many Stories.',
+          },
+        ],
+      }),
+    );
     expect(await resolveAppId(game('HoloCure')), '5');
     expect(await resolveAppId(game('inKonbini')), '7');
   });
@@ -98,16 +111,20 @@ void main() {
     file('Bodycam/Saved/config.ini');
     file('Over the Hill/OverTheHill.exe', 2000);
     file('Over the Hill Expedition/OverTheHill.exe', 2000);
-    File('${tmp.path}/Steam/steamapps/appmanifest_1.acf')
-        .writeAsStringSync('"appid" "1" "name" "Over the Hill" "installdir" "Over the Hill"');
+    File('${tmp.path}/Steam/steamapps/appmanifest_1.acf').writeAsStringSync(
+      '"appid" "1" "name" "Over the Hill" "installdir" "Over the Hill"',
+    );
     file('Half/Half.exe', 2000);
     file('Steamworks Shared/x.exe', 2000);
     File('${tmp.path}/Steam/steamapps/appmanifest_2.acf').writeAsStringSync(
-        '"appid" "2" "name" "Half" "installdir" "Half" "StateFlags" "1026" "x" "y"');
+      '"appid" "2" "name" "Half" "installdir" "Half" "StateFlags" "1026" "x" "y"',
+    );
     File('${tmp.path}/Steam/steamapps/appmanifest_3.acf').writeAsStringSync(
-        '"appid" "3" "name" "Steamworks Common Redistributables" "installdir" "Steamworks Shared" "StateFlags" "4"');
+      '"appid" "3" "name" "Steamworks Common Redistributables" "installdir" "Steamworks Shared" "StateFlags" "4"',
+    );
     File('${tmp.path}/Steam/steamapps/appmanifest_4.acf').writeAsStringSync(
-        '"appid" "4" "name" "Left Over" "installdir" "LeftOver" "StateFlags" "2"');
+      '"appid" "4" "name" "Left Over" "installdir" "LeftOver" "StateFlags" "2"',
+    );
     file('LeftOver/readme.txt', 20);
     steamRootsOverride = ['${tmp.path}/Steam'];
     final names = scanAllGames([]).map((g) => g.name).toList();
@@ -124,43 +141,105 @@ void main() {
     artworkFetchOverride = (u) async {
       final id = u.queryParameters['appids'];
       if (id == '1') {
-        return utf8.encode(jsonEncode({'1': {'data': {'type': 'game', 'genres': [{'id': '57'}]}}}));
+        return utf8.encode(
+          jsonEncode({
+            '1': {
+              'data': {
+                'type': 'game',
+                'genres': [
+                  {'id': '57'},
+                ],
+              },
+            },
+          }),
+        );
       }
       if (id == '2') {
-        return utf8.encode(jsonEncode({'2': {'data': {'type': 'game', 'genres': [{'id': '1'}]}}}));
+        return utf8.encode(
+          jsonEncode({
+            '2': {
+              'data': {
+                'type': 'game',
+                'genres': [
+                  {'id': '1'},
+                ],
+              },
+            },
+          }),
+        );
       }
       return null;
     };
     GameInfo steam(String id) => GameInfo(
-        id: id, name: id, folder: '/g/$id', appId: id, launcher: 'Steam');
+      id: id,
+      name: id,
+      folder: '/g/$id',
+      appId: id,
+      launcher: 'Steam',
+    );
     final kept = await dropSteamSoftware([steam('1'), steam('2'), steam('3')]);
     expect(kept.map((g) => g.appId), ['2', '3']);
   });
 
-  test('hashed store assets are used when the plain CDN path has no cover',
-      () async {
-    final urls = <String>[];
-    artworkFetchOverride = (u) async {
-      urls.add('$u');
-      if (u.host == 'api.steampowered.com') {
-        return utf8.encode(jsonEncode({
-          'response': {
-            'store_items': [
-              {
-                'assets': {
-                  'asset_url_format': r'steam/apps/9/${FILENAME}?t=1',
-                  'library_capsule_2x': 'abc123/library_capsule_2x.jpg',
-                },
+  test(
+    'hashed store assets are used when the plain CDN path has no cover',
+    () async {
+      final urls = <String>[];
+      artworkFetchOverride = (u) async {
+        urls.add('$u');
+        if (u.host == 'api.steampowered.com') {
+          return utf8.encode(
+            jsonEncode({
+              'response': {
+                'store_items': [
+                  {
+                    'assets': {
+                      'asset_url_format': r'steam/apps/9/${FILENAME}?t=1',
+                      'library_capsule_2x': 'abc123/library_capsule_2x.jpg',
+                    },
+                  },
+                ],
               },
-            ],
-          },
-        }));
-      }
-      return u.path.contains('abc123') ? jpg : null;
-    };
-    final path = await resolveArtwork(game('B', appId: '9'));
-    expect(path, endsWith('9_cover_v2.jpg'));
-    expect(urls.any((u) => u.contains('/9/abc123/library_capsule_2x.jpg')),
-        isTrue);
+            }),
+          );
+        }
+        return u.path.contains('abc123') ? jpg : null;
+      };
+      final path = await resolveArtwork(game('B', appId: '9'));
+      expect(path, endsWith('9_cover_v2.jpg'));
+      expect(
+        urls.any((u) => u.contains('/9/abc123/library_capsule_2x.jpg')),
+        isTrue,
+      );
+    },
+  );
+
+  test('full-size download beats the 300x450 Steam cache, which is the '
+      'fallback', () async {
+    final cache = Directory(p.join(tmp.path, 'Steam/appcache/librarycache/7/h'))
+      ..createSync(recursive: true);
+    File(p.join(cache.path, 'library_600x900.jpg')).writeAsBytesSync(jpg);
+    steamRootsOverride = [p.join(tmp.path, 'Steam')];
+    // Offline: the low-res local file is used.
+    artworkFetchOverride = (u) async => null;
+    expect(
+      await resolveArtwork(game('C', appId: '7')),
+      endsWith('library_600x900.jpg'),
+    );
+    // Online: the download replaces it.
+    resetArtworkCaches();
+    artworkFetchOverride = (u) async => jpg;
+    expect(
+      await resolveArtwork(game('C', appId: '7')),
+      endsWith('7_cover_v2.jpg'),
+    );
+    // A local 2x file wins over everything, without any request.
+    File(p.join(cache.path, 'library_600x900_2x.jpg')).writeAsBytesSync(jpg);
+    resetArtworkCaches();
+    artworkFetchOverride = (u) async => fail('no request expected');
+    expect(
+      await resolveArtwork(game('C', appId: '7')),
+      endsWith('library_600x900_2x.jpg'),
+    );
   });
 }

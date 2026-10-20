@@ -37,6 +37,10 @@ x86_64-w64-mingw32-g++ -std=c++17 -O2 -Wall -Wextra -shared -static-libgcc -stat
    `LogOutput.log` also gets a `camera dump` block (every camera, its components and command buffers, the Post Processing Stack
    `antialiasingMode` if there is one, and `QualitySettings.antiAliasing`) whenever that picture changes, so changing the game's AA
    option while it runs logs a new block that shows where the game keeps its AA.
+   `ForcePostAa=None|Fxaa|Smaa|Taa` sets the Post Processing Stack v2 antialiasing mode on the game camera (reflection); `Game`
+   (default) keeps the game's choice, except that a game choice of TAA is switched off while `Jitter=true`, since TAA jitters the camera
+   itself. This tests whether the game's post-process AA works under the bridge: with `Jitter=false, Quality=DLAA`, `ForcePostAa=Fxaa`
+   should visibly smooth model edges compared with `None`. `LogOutput.log` logs the game's mode and the applied one.
 5. Undo: delete `winhttp.dll`, `doorstop_config.ini`, `BepInEx\`, `helixsr_unity.dll` and `helixsr_unity.log`.
 
 The manager does not install any of this yet.

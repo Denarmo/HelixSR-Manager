@@ -51,6 +51,17 @@ One C# source tree, two build targets.
    - Linux: `WINEDLLOVERRIDES="winhttp=n,b"` for the doorstop (plus `dxgi`/`nvngx` when OptiScaler is used).
 3. **Per-game profiles** for games that need tweaks (which camera to upscale, UI camera to leave alone), starting with Disney Dreamlight Valley.
 
+## First test game: Art of Rally
+
+Chosen by the project owner. What is known (not yet checked on an installed copy):
+
+- Unity **2019.4.38** (from a third-party game profile; the manager's detector reads this from `globalgamemanagers`), D3D11 (inferred, same source). Unity 2019 has no shippable D3D12 player, so the **D3D11 path through OptiScaler is required**; the direct D3D12 path from phase 2 cannot be used here.
+- Likely Mono + Built-in pipeline (typical for a 2019 Unity game), which is what the plugin skeleton targets. First thing to do on a real install: run the manager's Unity detection on the game folder and confirm backend and pipeline.
+- Unity 2019 Built-in has no native motion-vector texture for all cameras; `Camera.depthTextureMode |= MotionVectors` works for opaque geometry only, so expect ghosting on vehicles' particle/transparent effects until the plugin adds a custom motion pass.
+- Singleplayer racing game, so the anti-cheat concern from the plan does not apply.
+
+Revised order: render-scale target and DLSS-call hand-off to OptiScaler (`Dx11Upscaler=fsr31_12`) first, then the manager route.
+
 ## Phases
 
 1. Detection in the manager (this PR).

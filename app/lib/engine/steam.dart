@@ -145,27 +145,41 @@ String? _findCached(String dir, String name, [int depth = 0]) {
 }
 
 /// Local library-cache art for [appId], or null. Remote URLs come from
-/// artwork.dart. Only the real portrait cover (or hero); the landscape header
-/// is [findSteamHeader], used when nothing better exists.
-String? findSteamArtwork(String? appId, {bool hero = false}) {
+/// artwork.dart. Covers: Steam's 2x portrait or HelixSR's own download first;
+/// the plain library_600x900.jpg is only 300x450 in Steam's cache, so it is
+/// returned only with [lowRes], as a last resort. The landscape header is
+/// [findSteamHeader].
+String? findSteamArtwork(
+  String? appId, {
+  bool hero = false,
+  bool lowRes = false,
+}) {
   if (appId == null || appId.isEmpty) return null;
-  final file = hero ? 'library_hero.jpg' : 'library_600x900.jpg';
-  for (final root in getSteamRoots()) {
-    final cache = p.join(root, 'appcache', 'librarycache');
-    final hit =
-        _findCached(p.join(cache, appId), file) ??
-        (fileExists(p.join(cache, '${appId}_$file'))
-            ? p.join(cache, '${appId}_$file')
-            : null);
-    if (hit != null) return hit;
-  }
-  final cached = p.join(
+  final files = hero
+      ? ['library_hero.jpg']
+      : ['library_600x900_2x.jpg', if (lowRes) 'library_600x900.jpg'];
+  final downloaded = p.join(
     dataDir(),
     'cache',
     'covers',
     hero ? '${appId}_hero_v2.jpg' : '${appId}_cover_v2.jpg',
   );
-  return fileExists(cached) ? cached : null;
+  String? lookup(String file) {
+    for (final root in getSteamRoots()) {
+      final cache = p.join(root, 'appcache', 'librarycache');
+      final flat = p.join(cache, '${appId}_$file');
+      final hit =
+          _findCached(p.join(cache, appId), file) ??
+          (fileExists(flat) ? flat : null);
+      if (hit != null) return hit;
+    }
+    return null;
+  }
+
+  final hi = lookup(files.first);
+  if (hi != null) return hi;
+  if (fileExists(downloaded)) return downloaded;
+  return files.length > 1 ? lookup(files[1]) : null;
 }
 
 /// Landscape header from Steam's local cache, a last resort for a cover.

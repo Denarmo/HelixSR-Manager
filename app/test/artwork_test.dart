@@ -87,4 +87,23 @@ void main() {
     expect(await resolveAppId(game('HoloCure')), '5');
     expect(await resolveAppId(game('inKonbini')), '7');
   });
+
+  test('scan keeps real installs, hides leftovers, merges copies', () {
+    final common = '${tmp.path}/Steam/steamapps/common';
+    void file(String path, [int size = 10]) => File('$common/$path')
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(List.filled(size, 1));
+    file('HoloCure/data.win', 31 * 1024 * 1024);
+    file('HoloCure/version.ini');
+    file('Bodycam/Saved/config.ini');
+    file('Over the Hill/OverTheHill.exe', 2000);
+    file('Over the Hill Expedition/OverTheHill.exe', 2000);
+    File('${tmp.path}/Steam/steamapps/appmanifest_1.acf')
+        .writeAsStringSync('"appid" "1" "name" "Over the Hill" "installdir" "Over the Hill"');
+    steamRootsOverride = ['${tmp.path}/Steam'];
+    final names = scanAllGames([]).map((g) => g.name).toList();
+    expect(names, containsAll(['HoloCure', 'Over the Hill']));
+    expect(names, isNot(contains('Bodycam')));
+    expect(names, isNot(contains('Over the Hill Expedition')));
+  });
 }

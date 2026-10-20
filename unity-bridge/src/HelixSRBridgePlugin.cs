@@ -13,11 +13,18 @@ using UnityEngine.Rendering;
 
 namespace HelixSR.UnityBridge
 {
-    [BepInPlugin("com.helixsr.unitybridge", "HelixSR Unity Bridge", "0.2.0")]
+    /// <summary>Post Processing Stack v2 antialiasingMode values (PostProcessLayer.Antialiasing); Game = leave the game's choice.</summary>
+    public enum PostAa { Game = -1, None = 0, Fxaa = 1, Smaa = 2, Taa = 3 }
+
+    [BepInPlugin("com.helixsr.unitybridge", "HelixSR Unity Bridge", "0.3.0")]
     public class HelixSRBridgePlugin : BaseUnityPlugin
     {
         private ConfigEntry<HelixMath.Quality> _quality;
         private ConfigEntry<bool> _enabled, _jitter, _msaa;
+        private ConfigEntry<PostAa> _postAa;
+        private Behaviour _layer;
+        private FieldInfo _aaField;
+        private int _lastAa = -2;
         private int _colorAa = 1;
         private int _frame;
         private int _lastRenderW, _lastRenderH;
@@ -33,6 +40,7 @@ namespace HelixSR.UnityBridge
             _enabled = Config.Bind("General", "Enabled", true, "Turn the bridge off without uninstalling it.");
             _jitter = Config.Bind("Debug", "Jitter", true, "Sub-pixel camera jitter. Turn off to tell jitter shimmer (expected until a temporal upscaler resolves it) from other causes.");
             _msaa = Config.Bind("General", "MatchGameMsaa", true, "Give the render-scale target the game's MSAA level. A camera rendering into a RenderTexture ignores QualitySettings.antiAliasing, so without this the game's MSAA is lost (jagged model edges).");
+            _postAa = Config.Bind("Debug", "ForcePostAa", PostAa.Game, "Force the Post Processing Stack v2 antialiasing mode on the game camera (Game = keep the game's choice). Tests whether the game's post-process AA works under the bridge. With Jitter on, a game choice of TAA is switched off, because TAA jitters the camera itself.");
             _quality = Config.Bind("General", "Quality", HelixMath.Quality.Quality, "DLSS quality mode HelixSR is driven with.");
             _cmd = new CommandBuffer { name = "HelixSR upscale" };
             Camera.onPreCull += HandlePreCull;
@@ -123,6 +131,35 @@ namespace HelixSR.UnityBridge
             }
         }
 
+        // PostProcessLayer comes from the game's own Unity.Postprocessing.Runtime.dll, so it is reached by reflection.
+        private void ApplyPostAa(Camera cam)
+        {
+            if (_layer == null)
+            {
+                foreach (Behaviour b in cam.GetComponents<Behaviour>())
+                {
+                    if (b != null && b.GetType().Name == "PostProcessLayer")
+                    {
+                        _layer = b;
+                        _aaField = b.GetType().GetField("antialiasingMode", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        break;
+                    }
+                }
+                if (_layer == null) return;
+            }
+            if (_aaField == null) return;
+
+            int cur = Convert.ToInt32(_aaField.GetValue(_layer));
+            int want = (int)_postAa.Value;
+            if (want < 0) want = (_jitter.Value && cur == (int)PostAa.Taa) ? (int)PostAa.None : cur;
+            if (want != cur) _aaField.SetValue(_layer, Enum.ToObject(_aaField.FieldType, want));
+            if (cur != _lastAa)
+            {
+                Logger.LogInfo("PostProcessLayer.antialiasingMode: game=" + cur + " applied=" + want + " (0 none, 1 FXAA, 2 SMAA, 3 TAA)");
+                _lastAa = cur;
+            }
+        }
+
         private void EnsureOutput(int w, int h)
         {
             if (_output != null && _output.width == w && _output.height == h) return;
@@ -140,6 +177,7 @@ namespace HelixSR.UnityBridge
             int dispW = Screen.width, dispH = Screen.height, rw, rh;
             HelixMath.RenderSize(_quality.Value, dispW, dispH, out rw, out rh);
 
+            ApplyPostAa(cam);
             if (_frame >= _dumpCheckFrame) { _dumpCheckFrame = _frame + 60; DumpCamerasIfChanged(); }
 
             // Depth and motion vectors are what HelixSR (DLSS) needs besides color.

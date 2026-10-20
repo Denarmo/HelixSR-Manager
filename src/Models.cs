@@ -63,6 +63,7 @@ namespace HelixSRSwapper
         public bool HasLogs { get; set; }
         public bool HasMyFsr { get; set; }
         public bool IsReEngine { get; set; }
+        public bool IsInZoi { get; set; }
 
         public GameInfo()
         {

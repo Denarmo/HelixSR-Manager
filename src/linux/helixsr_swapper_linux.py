@@ -371,6 +371,167 @@ def detect_re_engine(game_folder, game_name):
     return False
 
 
+# inZOI (KRAFTON, Unreal Engine 5): project name "BlueClient", Steam AppId 2456740
+INZOI_APPID = "2456740"
+INZOI_SETTINGS_SECTION = "/Script/BlueClient.B1GameUserSettings"
+INZOI_BACKUP_FILE = "GameUserSettings.helixsr-backup.json"
+INZOI_SETTING_KEYS = ("DLSSValue", "DLSSG", "FSR3Value", "FSR3FI")
+
+
+def detect_inzoi(game_folder, game_name, appid=None, exe_name=None):
+    if appid and str(appid) == INZOI_APPID:
+        return True
+    if not game_folder or not os.path.isdir(game_folder):
+        return False
+    # 1. Unreal project folder "BlueClient" with its Win64 binaries
+    if os.path.isdir(os.path.join(game_folder, "BlueClient", "Binaries", "Win64")):
+        return True
+    # 2. Shipping executable name
+    low_exe = (exe_name or "").lower()
+    if low_exe.startswith("blueclient") or low_exe.startswith("inzoi"):
+        return True
+    # 3. Title / folder name
+    low_name = (game_name or os.path.basename(game_folder)).lower().replace(" ", "")
+    return "inzoi" in low_name
+
+
+def get_inzoi_user_settings_path(game):
+    """inZOI keeps its graphics options in %LOCALAPPDATA%\\BlueClient\\Saved\\Config\\Windows\\GameUserSettings.ini,
+    which under Proton lives in the game's compatdata prefix."""
+    rel = os.path.join("pfx", "drive_c", "users", "steamuser", "AppData", "Local",
+                       "BlueClient", "Saved", "Config", "Windows", "GameUserSettings.ini")
+    appid = str(game.get("appId") or INZOI_APPID)
+    commons = []
+    folder = game.get("folder")
+    if folder:
+        commons.append(os.path.dirname(folder.rstrip("/\\")))  # <library>/steamapps/common
+    commons.extend(get_steam_libraries())
+    for common in commons:
+        cand = os.path.join(os.path.dirname(common), "compatdata", appid, rel)
+        if os.path.isfile(cand):
+            return cand
+    if os.name == "nt":
+        cand = os.path.join(os.environ.get("LOCALAPPDATA", ""), "BlueClient", "Saved", "Config", "Windows", "GameUserSettings.ini")
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
+def apply_inzoi_optiscaler_ini(txt):
+    """OptiScaler's documented Unreal Engine on AMD fixes (resource barriers against rainbow colors, forced auto
+    exposure against crushed dark areas)."""
+    txt = set_ini_value(txt, "AutoExposure", "true", "InitFlags")
+    txt = set_ini_value(txt, "ColorResourceBarrier", "4", "Hotfix")
+    txt = set_ini_value(txt, "MotionVectorResourceBarrier", "8", "Hotfix")
+    return txt
+
+
+def _find_ue_ini_section(text, section):
+    # Section body runs from its header to the next header (or end of file)
+    return re.search(rf"(?ms)^\[{re.escape(section)}\][ \t]*\r?\n(.*?)(?=^\[|\Z)", text)
+
+
+def get_ue_ini_value(text, section, key):
+    sec = _find_ue_ini_section(text, section)
+    if not sec:
+        return None
+    m = re.search(rf"(?m)^{re.escape(key)}[ \t]*=[ \t]*([^\r\n]*?)[ \t]*\r?$", sec.group(1))
+    return m.group(1) if m else None
+
+
+def set_ue_ini_value(text, section, key, value):
+    """Section-scoped "Key=Value" setter for Unreal Engine config files (no spaces around '=', unlike set_ini_value)."""
+    line = f"{key}={value}"
+    sec = _find_ue_ini_section(text, section)
+    if not sec:
+        sep = "" if not text or text.endswith("\n") else "\r\n"
+        return text + sep + f"[{section}]\r\n{line}\r\n"
+    body = sec.group(1)
+    key_re = re.compile(rf"(?m)^{re.escape(key)}[ \t]*=[^\r\n]*")
+    if key_re.search(body):
+        new_body = key_re.sub(lambda _m: line, body, count=1)
+    else:
+        # Append after the section's last non-empty line
+        trimmed = body.rstrip("\r\n")
+        tail = body[len(trimmed):]
+        new_body = (trimmed + "\r\n" if trimmed else "") + line + (tail or "\r\n")
+    return text[:sec.start(1)] + new_body + text[sec.end(1):]
+
+
+def remove_ue_ini_value(text, section, key):
+    sec = _find_ue_ini_section(text, section)
+    if not sec:
+        return text
+    new_body = re.sub(rf"(?m)^{re.escape(key)}[ \t]*=[^\r\n]*\r?\n?", "", sec.group(1))
+    return text[:sec.start(1)] + new_body + text[sec.end(1):]
+
+
+def apply_inzoi_user_settings(game):
+    """Selects the in-game upscaler that feeds HelixSR: DLSS for the OptiScaler and DLSS loader routes, FSR 3 for the
+    direct route. The game's own values are saved next to the file and put back by restore_inzoi_user_settings."""
+    cfg_path = get_inzoi_user_settings_path(game)
+    if not cfg_path:
+        return  # the game writes it on first launch; install again afterwards to apply
+    try:
+        with open(cfg_path, "r", encoding="utf-8", errors="ignore", newline="") as f:
+            text = f.read()
+        backup_path = os.path.join(os.path.dirname(cfg_path), INZOI_BACKUP_FILE)
+        if not os.path.isfile(backup_path):
+            original = {k: get_ue_ini_value(text, INZOI_SETTINGS_SECTION, k) for k in INZOI_SETTING_KEYS}
+            with open(backup_path, "w", encoding="utf-8") as f:
+                json.dump(original, f, indent=2)
+
+        def current_int(key):
+            try:
+                return int(get_ue_ini_value(text, INZOI_SETTINGS_SECTION, key) or "0")
+            except ValueError:
+                return 0
+
+        if game.get("route") == "direct":
+            if current_int("FSR3Value") <= 0:
+                text = set_ue_ini_value(text, INZOI_SETTINGS_SECTION, "FSR3Value", "4")  # Quality
+            text = set_ue_ini_value(text, INZOI_SETTINGS_SECTION, "DLSSValue", "0")
+            text = set_ue_ini_value(text, INZOI_SETTINGS_SECTION, "DLSSG", "False")
+        else:
+            if current_int("DLSSValue") <= 0:
+                text = set_ue_ini_value(text, INZOI_SETTINGS_SECTION, "DLSSValue", "4")  # Quality
+            text = set_ue_ini_value(text, INZOI_SETTINGS_SECTION, "FSR3Value", "0")
+            text = set_ue_ini_value(text, INZOI_SETTINGS_SECTION, "FSR3FI", "False")
+            # DLSS-G only when OptiScaler translates it (DLSS-G input modes); it does not work with the DLSS loader
+            dlssg = game.get("route") == "optiscaler" and (game.get("fgMode") or "").startswith("dlssg_")
+            text = set_ue_ini_value(text, INZOI_SETTINGS_SECTION, "DLSSG", "True" if dlssg else "False")
+
+        with open(cfg_path, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+    except Exception:
+        pass
+
+
+def restore_inzoi_user_settings(game):
+    cfg_path = get_inzoi_user_settings_path(game)
+    if not cfg_path:
+        return
+    backup_path = os.path.join(os.path.dirname(cfg_path), INZOI_BACKUP_FILE)
+    if not os.path.isfile(backup_path):
+        return
+    try:
+        with open(backup_path, "r", encoding="utf-8") as f:
+            original = json.load(f) or {}
+        with open(cfg_path, "r", encoding="utf-8", errors="ignore", newline="") as f:
+            text = f.read()
+        for key in INZOI_SETTING_KEYS:
+            val = original.get(key)
+            if val is None:
+                text = remove_ue_ini_value(text, INZOI_SETTINGS_SECTION, key)
+            else:
+                text = set_ue_ini_value(text, INZOI_SETTINGS_SECTION, key, str(val))
+        with open(cfg_path, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        os.remove(backup_path)
+    except Exception:
+        pass
+
+
 def compute_proton_launch_option(route, opti_dll, install_reframework):
     dlls = []
     if route == "optiscaler":
@@ -479,6 +640,7 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
 
     exe_folder = best_exe_dir or game_folder
     is_re = detect_re_engine(game_folder, name)
+    is_inzoi = detect_inzoi(game_folder, name, appid, best_exe_name)
     has_ref_file = os.path.isfile(os.path.join(exe_folder, "reframework_revision.txt")) or os.path.isfile(os.path.join(exe_folder, "dinput8.dll"))
     install_ref = is_re or has_ref_file
 
@@ -604,6 +766,7 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
         "foundXeFgPath": found_xe_fg_path,
         "foundXeLlPath": found_xe_ll_path,
         "isReEngine": is_re,
+        "isInZoi": is_inzoi,
         "installReFramework": install_ref,
         "installed": installed,
         "version": version,
@@ -868,6 +1031,10 @@ def uninstall_reframework(game):
 
 
 def cleanup_helixsr_files(game):
+    # inZOI: put back the game's own upscaler settings (install applies them again)
+    if game.get("isInZoi"):
+        restore_inzoi_user_settings(game)
+
     exe_dir = game.get("exeFolder") or game.get("folder")
     if exe_dir and os.path.isdir(exe_dir):
         helix_dir = os.path.join(exe_dir, HELIXSR_FOLDER)
@@ -1181,6 +1348,9 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
                 txt = set_ini_value(txt, "FGInput", "auto", "FrameGen")
                 txt = set_ini_value(txt, "FGOutput", "nofg", "FrameGen")
 
+            if game.get("isInZoi"):
+                txt = apply_inzoi_optiscaler_ini(txt)
+
             with open(game_ini, "w", encoding="utf-8") as f:
                 f.write(txt)
 
@@ -1259,6 +1429,9 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
             }, f, indent=2)
 
         clear_shader_cache(game)
+
+    if game.get("isInZoi"):
+        apply_inzoi_user_settings(game)
 
     if game.get("installReFramework"):
         install_reframework_nightly(game)
@@ -3009,6 +3182,8 @@ def run_standalone_gui(smoke_test_ms=0):
                     badges.append((inp, self.c_violet, "#ffffff"))
             if game.get("isReEngine"):
                 badges.append(("RE", "#b42828", "#ffffff"))
+            if game.get("isInZoi"):
+                badges.append(("inZOI", "#7c3aed", "#ffffff"))
 
             for b_txt, b_bg, b_fg in badges:
                 tw = max(28, len(b_txt) * 7 + 12)

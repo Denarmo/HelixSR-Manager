@@ -115,6 +115,11 @@ Designed for **Steam Deck**, **ROG Ally**, **Legion Go**, **MSI Claw**, and couc
 - **Capcom RE Engine & REFramework Nightly Automation**:
   - Automatically detects Capcom RE Engine titles (*Dragon's Dogma 2*, *Monster Hunter Wilds*, *Monster Hunter Rise*, *Resident Evil 2 / 3 / 4 / 7 / Village*, *Pragmata*, *Street Fighter 6*, *Devil May Cry 5*, *Kunitsu-Gami*, *Dead Rising Deluxe Remaster*, etc.).
   - Optional one-click download and deployment of **[REFramework Nightly](https://github.com/praydog/REFramework-nightly)** (`dinput8.dll`), `_storage_` directory mirroring, and automatic `config.ini` sanitization (resetting stale `[Render/Adapter]` GPU locks and incompatible Reflex flags).
+- **inZOI Game Profile (Unreal Engine 5)**:
+  - Automatically detects *inZOI* (Steam AppId `2456740`, `BlueClient` project folder or `inZOI-Win64-Shipping.exe`) and tags it with an `inZOI` badge.
+  - On install, selects the in-game upscaler that feeds HelixSR in `BlueClient\Saved\Config\Windows\GameUserSettings.ini` (`%LOCALAPPDATA%` on Windows, the game's Proton `compatdata` prefix on Linux / SteamOS): **DLSS** (`DLSSValue` Quality, `FSR3Value=0`, `FSR3FI=False`) for the OptiScaler and DLSS Loader routes, **FSR 3** for Direct FSR 3.1. `DLSSG` is only enabled when a DLSS-G translation mode is picked.
+  - Adds OptiScaler's Unreal Engine on AMD fixes to `OptiScaler.ini` (`ColorResourceBarrier = 4`, `MotionVectorResourceBarrier = 8`, `AutoExposure = true`).
+  - The game's original values are kept in `GameUserSettings.helixsr-backup.json` and put back on uninstall. Launch the game once before installing so `GameUserSettings.ini` exists.
 - **Shader Cache Purger, Live INI Editor, Log Viewer & Atomic Backups**:
   - One-click **Clear Shader Cache** button purges corrupted DX12 pipeline caches (`shader.cache2`, `piplinelist.bin`, `*shader*.bin`, and Linux Proton `DXVK_state_cache` / `fozpipelinesv6`).
   - Built-in **`OptiScaler.ini` editor** and live **`helixsr.log` / `OptiScaler.log` diagnostic viewer** inside the slide-out Game Drawer.

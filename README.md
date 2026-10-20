@@ -120,6 +120,8 @@ Designed for **Steam Deck**, **ROG Ally**, **Legion Go**, **MSI Claw**, and couc
   - On install, selects the in-game upscaler that feeds HelixSR in `BlueClient\Saved\Config\Windows\GameUserSettings.ini` (`%LOCALAPPDATA%` on Windows, the game's Proton `compatdata` prefix on Linux / SteamOS): **DLSS** (`DLSSValue` Quality, `FSR3Value=0`, `FSR3FI=False`) for the OptiScaler and DLSS Loader routes, **FSR 3** for Direct FSR 3.1. `DLSSG` is only enabled when a DLSS-G translation mode is picked.
   - Adds OptiScaler's Unreal Engine on AMD fixes to `OptiScaler.ini` (`ColorResourceBarrier = 4`, `MotionVectorResourceBarrier = 8`, `AutoExposure = true`).
   - The game's original values are kept in `GameUserSettings.helixsr-backup.json` and put back on uninstall. Launch the game once before installing so `GameUserSettings.ini` exists.
+- **Unity Game Detection**:
+  - Detects Unity games (`UnityPlayer.dll` / `<game>_Data`), reads the engine version, scripting backend (Mono / IL2CPP), render pipeline (Built-in / URP / HDRP) and whether the build ships the D3D12 player, and tags them with a `Unity` badge and a `Unity` filter pill. This is the first step of Unity support for games without DLSS or FSR; see [docs/unity-support.md](docs/unity-support.md) for the plan.
 - **Shader Cache Purger, Live INI Editor, Log Viewer & Atomic Backups**:
   - One-click **Clear Shader Cache** button purges corrupted DX12 pipeline caches (`shader.cache2`, `piplinelist.bin`, `*shader*.bin`, and Linux Proton `DXVK_state_cache` / `fozpipelinesv6`).
   - Built-in **`OptiScaler.ini` editor** and live **`helixsr.log` / `OptiScaler.log` diagnostic viewer** inside the slide-out Game Drawer.

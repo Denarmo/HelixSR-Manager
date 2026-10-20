@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'artwork.dart' show normalizeGameName;
 import 'constants.dart';
 import 'models.dart';
 import 'paths.dart';
@@ -399,6 +400,28 @@ UnityInfo? detectUnity(String exeDir, String? exeName) {
   );
 }
 
+/// Folders such as "Steam Controller Configs" or a mod backup directory have
+/// no Steam manifest, no executable and no HelixSR files.
+bool _isNotAGame(GameInfo g) =>
+    g.appId == null && g.exeName == null && !g.installed;
+
+/// A user-added folder named like the start of a Steam game's title
+/// ("over the hill" vs "Over the Hill Expedition") is the same game.
+bool _duplicatesSteamGame(GameInfo g, List<GameInfo> existing) {
+  if (g.appId != null) return existing.any((e) => e.appId == g.appId);
+  final mine = normalizeGameName(g.name).split(' ');
+  if (mine.length < 2) return false;
+  return existing.any((e) {
+    if (e.appId == null) return false;
+    final theirs = normalizeGameName(e.name).split(' ');
+    if (theirs.length < mine.length) return false;
+    for (var i = 0; i < mine.length; i++) {
+      if (mine[i] != theirs[i]) return false;
+    }
+    return true;
+  });
+}
+
 List<GameInfo> scanAllGames(List<String> customFolders) {
   final manifests = getSteamManifests();
   final result = <GameInfo>[];
@@ -414,6 +437,7 @@ List<GameInfo> scanAllGames(List<String> customFolders) {
         if (key.isEmpty || !scanned.add(key)) continue;
         final g = scanGame(norm, p.basename(norm), manifests);
         if (g.exeFolder != null) scanned.add(canonicalKey(g.exeFolder!));
+        if (_isNotAGame(g)) continue;
         result.add(g);
       }
     } catch (_) {}
@@ -427,6 +451,7 @@ List<GameInfo> scanAllGames(List<String> customFolders) {
     final g = scanGame(norm, p.basename(norm), manifests);
     final exeKey = canonicalKey(g.exeFolder ?? '');
     if (exeKey.isNotEmpty && exeKey != key && !scanned.add(exeKey)) continue;
+    if (_isNotAGame(g) || _duplicatesSteamGame(g, result)) continue;
     result.add(g);
   }
 

@@ -158,6 +158,10 @@ int _score(String wanted, String candidate) {
   if (a == b) return 100;
   final ta = a.split(' ').toSet();
   final tb = b.split(' ').toSet();
+  // "holocure" vs "holocure save the fans", "in konbini" vs "inkonbini ...":
+  // the whole wanted title leads the candidate (spaces ignored).
+  final ca = a.replaceAll(' ', '');
+  if (ca.length >= 5 && b.replaceAll(' ', '').startsWith(ca)) return 75;
   final common = ta.intersection(tb).length;
   final total = ta.union(tb).length;
   var s = (60 * common / total).round();

@@ -75,4 +75,16 @@ void main() {
     expect(await resolveAppId(game('Obscure Indie Game')), isNull);
     expect(await resolveArtwork(game('Obscure Indie Game')), isNull);
   });
+
+  test('short title leading a longer Steam title still matches', () async {
+    artworkFetchOverride = (u) async => utf8.encode(jsonEncode({
+          'items': [
+            {'type': 'app', 'id': 5, 'name': 'HoloCure - Save the Fans!'},
+            {'type': 'app', 'id': 6, 'name': 'Holo Something Else'},
+            {'type': 'app', 'id': 7, 'name': 'In Konbini: One Store. Many Stories.'},
+          ],
+        }));
+    expect(await resolveAppId(game('HoloCure')), '5');
+    expect(await resolveAppId(game('inKonbini')), '7');
+  });
 }

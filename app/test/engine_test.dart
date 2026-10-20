@@ -182,6 +182,118 @@ void main() {
     extras.inZoiConfigDirOverride = null;
   });
 
+  group('Unity detection', () {
+    GameInfo unityGame(
+      String name,
+      String exe, {
+      List<String> files = const [],
+      Map<String, String> text = const {},
+      Map<String, List<int>> bytes = const {},
+    }) {
+      final dir = p.join(tmp.path, 'games', name);
+      for (final f in [exe, ...files]) {
+        File(p.join(dir, f))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('x $f');
+      }
+      text.forEach(
+        (f, c) => File(p.join(dir, f))
+          ..createSync(recursive: true)
+          ..writeAsStringSync(c),
+      );
+      bytes.forEach(
+        (f, c) => File(p.join(dir, f))
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(c),
+      );
+      return scanGame(dir, name, null);
+    }
+
+    test('IL2CPP + URP on Unity 6', () {
+      final g = unityGame(
+        'Ddv',
+        'Dreamlight.exe',
+        files: ['UnityPlayer.dll', 'GameAssembly.dll'],
+        text: {
+          'Dreamlight_Data/ScriptingAssemblies.json': '{"names":["Assembly-CSharp.dll","Unity.RenderPipelines.Universal.Runtime.dll"]}',
+        },
+        bytes: {
+          'Dreamlight_Data/globalgamemanagers': [
+            ...List.filled(16, 0),
+            ...'6000.0.23f1'.codeUnits,
+            0,
+          ],
+        },
+      );
+      expect(g.isUnity, isTrue);
+      expect(g.tags, contains('UNITY'));
+      expect(g.unity!.version, '6000.0.23f1');
+      expect(g.unity!.backend, 'IL2CPP');
+      expect(g.unity!.pipeline, 'URP');
+      expect(g.unity!.hasD3D12, isFalse);
+      expect(g.unity!.summary, 'Unity 6 · IL2CPP · URP');
+    });
+
+    test('Mono + Built-in with D3D12 player and BepInEx', () {
+      final g = unityGame(
+        'Val',
+        'valheim.exe',
+        files: [
+          'UnityPlayer.dll',
+          'D3D12/D3D12Core.dll',
+          'valheim_Data/Managed/Assembly-CSharp.dll',
+          'valheim_Data/Managed/UnityEngine.dll',
+          'BepInEx/core/BepInEx.dll',
+        ],
+        bytes: {
+          'valheim_Data/data.unity3d': [
+            ...'UnityFS'.codeUnits,
+            0,
+            ...'5.x.x'.codeUnits,
+            0,
+            ...'2022.3.17f1'.codeUnits,
+            0,
+          ],
+        },
+      );
+      expect(g.unity!.version, '2022.3.17f1');
+      expect(g.unity!.backend, 'Mono');
+      expect(g.unity!.pipeline, 'Built-in');
+      expect(g.unity!.hasD3D12, isTrue);
+      expect(g.unity!.hasBepInEx, isTrue);
+      expect(g.unity!.summary, 'Unity 2022.3 · Mono · Built-in · D3D12');
+    });
+
+    test('HDRP is told from the Managed folder without a version', () {
+      final g = unityGame(
+        'Hd',
+        'Game.exe',
+        files: [
+          'UnityPlayer.dll',
+          'Game_Data/globalgamemanagers',
+          'Game_Data/Managed/Assembly-CSharp.dll',
+          'Game_Data/Managed/Unity.RenderPipelines.HighDefinition.Runtime.dll',
+        ],
+      );
+      expect(g.unity!.version, isNull);
+      expect(g.unity!.pipeline, 'HDRP');
+      expect(g.unity!.summary, 'Unity · Mono · HDRP');
+    });
+
+    test('a non-Unity game is not tagged', () {
+      final g = makeGame('Plain');
+      expect(g.isUnity, isFalse);
+      expect(g.tags, isNot(contains('UNITY')));
+    });
+
+    test('formatUnityVersion', () {
+      expect(formatUnityVersion('6000.0.23f1'), 'Unity 6');
+      expect(formatUnityVersion('6000.1.2f1'), 'Unity 6.1');
+      expect(formatUnityVersion('2022.3.10f1'), 'Unity 2022.3');
+      expect(formatUnityVersion(null), 'Unity');
+    });
+  });
+
   test('install refuses when the network is not built', () async {
     File(p.join(core, dllFsr)).writeAsStringSync('HelixSR 1.8.1 bare');
     final g = makeGame('Eps');

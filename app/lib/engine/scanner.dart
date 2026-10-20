@@ -97,6 +97,7 @@ void _processGameDirectory(GameInfo game, String gameFolder) {
   game.fsrTargets = w.fsrTargets;
   game.isReEngine = detectReEngine(gameFolder, game);
   game.isInZoi = detectInZoi(gameFolder, game);
+  game.unity = detectUnity(game.exeFolder ?? gameFolder, game.exeName);
   game.installReFramework =
       game.isReEngine ||
       fileExists(
@@ -289,6 +290,113 @@ bool detectInZoi(String gameFolder, GameInfo? game) {
       ? game.name
       : p.basename(gameFolder));
   return name.toLowerCase().replaceAll(' ', '').contains('inzoi');
+}
+
+// Unity engine profile: the player ships UnityPlayer.dll (Unity 2017.2+) and/or
+// a "<exe>_Data" folder holding globalgamemanagers / data.unity3d next to the
+// game's .exe.
+final _unityVersionRe = RegExp(
+  r'(?<![\d.])((?:20\d\d|6\d{3}|5)\.\d{1,2}\.\d{1,3}[abfpx]\d{1,3})',
+);
+const _unityDataMarkers = ['globalgamemanagers', 'data.unity3d', 'mainData'];
+
+bool _isUnityDataFolder(String dir) =>
+    dirExists(dir) && _unityDataMarkers.any((m) => fileExists(p.join(dir, m)));
+
+String? _findUnityDataFolder(String exeDir, String? exeName) {
+  if (exeName != null && exeName.isNotEmpty) {
+    final named = p.join(exeDir, '${p.basenameWithoutExtension(exeName)}_Data');
+    if (_isUnityDataFolder(named)) return named;
+  }
+  try {
+    for (final e in Directory(exeDir).listSync(followLinks: false)) {
+      if (e is Directory &&
+          p.basename(e.path).toLowerCase().endsWith('_data') &&
+          _isUnityDataFolder(e.path)) {
+        return e.path;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+/// Engine version from the header of the player's first serialized file / bundle
+/// (for example "2022.3.10f1" or "6000.0.23f1").
+String? readUnityVersion(String dataDir) {
+  for (final name in _unityDataMarkers) {
+    final path = p.join(dataDir, name);
+    if (!fileExists(path)) continue;
+    try {
+      final raf = File(path).openSync();
+      try {
+        final head = raf.readSync(4096);
+        final m = _unityVersionRe.firstMatch(String.fromCharCodes(head));
+        if (m != null) return m.group(1);
+      } finally {
+        raf.closeSync();
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+/// Render pipeline from the scripting assemblies the build lists
+/// (ScriptingAssemblies.json, Unity 2020.2+) or ships (Mono: Managed folder).
+/// Null when it cannot be told (older IL2CPP builds).
+String? detectUnityPipeline(String dataDir, String? backend) {
+  String? assemblies;
+  try {
+    final list = p.join(dataDir, 'ScriptingAssemblies.json');
+    if (fileExists(list)) assemblies = File(list).readAsStringSync();
+  } catch (_) {}
+  if (assemblies == null && backend == 'Mono') {
+    try {
+      final managed = p.join(dataDir, 'Managed');
+      if (dirExists(managed)) {
+        assemblies = Directory(managed)
+            .listSync(followLinks: false)
+            .map((e) => p.basename(e.path))
+            .where((n) => n.toLowerCase().endsWith('.dll'))
+            .join('\n');
+      }
+    } catch (_) {}
+  }
+  if (assemblies == null) return null;
+  final low = assemblies.toLowerCase();
+  if (low.contains('unity.renderpipelines.highdefinition.runtime')) {
+    return 'HDRP';
+  }
+  if (low.contains('unity.renderpipelines.universal.runtime')) return 'URP';
+  return 'Built-in';
+}
+
+/// Unity profile of the folder holding the game's .exe, or null when the game
+/// is not a Unity game.
+UnityInfo? detectUnity(String exeDir, String? exeName) {
+  if (!dirExists(exeDir)) return null;
+  final dataDir = _findUnityDataFolder(exeDir, exeName);
+  final hasPlayer = fileExists(p.join(exeDir, 'UnityPlayer.dll'));
+  if (!hasPlayer && dataDir == null) return null;
+
+  // Scripting backend: IL2CPP builds ship GameAssembly.dll, Mono builds ship
+  // <exe>_Data/Managed.
+  String? backend;
+  if (fileExists(p.join(exeDir, 'GameAssembly.dll')) ||
+      (dataDir != null && dirExists(p.join(dataDir, 'il2cpp_data')))) {
+    backend = 'IL2CPP';
+  } else if (dataDir != null &&
+      fileExists(p.join(dataDir, 'Managed', 'Assembly-CSharp.dll'))) {
+    backend = 'Mono';
+  }
+
+  return UnityInfo(
+    version: dataDir == null ? null : readUnityVersion(dataDir),
+    backend: backend,
+    pipeline: dataDir == null ? null : detectUnityPipeline(dataDir, backend),
+    // Unity's D3D12 player loads the Agility SDK from a "D3D12" folder next to the .exe
+    hasD3D12: fileExists(p.join(exeDir, 'D3D12', 'D3D12Core.dll')),
+    hasBepInEx: dirExists(p.join(exeDir, 'BepInEx', 'core')),
+  );
 }
 
 List<GameInfo> scanAllGames(List<String> customFolders) {

@@ -119,6 +119,7 @@ class _GamesPageState extends State<_GamesPage> {
     GameFilter.notInstalled => 'Not installed',
     GameFilter.dlss => 'DLSS',
     GameFilter.reEngine => 'RE Engine',
+    GameFilter.unity => 'Unity',
   };
 
   @override

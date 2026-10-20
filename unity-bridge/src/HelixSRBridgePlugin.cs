@@ -27,15 +27,15 @@ namespace HelixSR.UnityBridge
             _enabled = Config.Bind("General", "Enabled", true, "Turn the bridge off without uninstalling it.");
             _quality = Config.Bind("General", "Quality", HelixMath.Quality.Quality, "DLSS quality mode HelixSR is driven with.");
             _cmd = new CommandBuffer { name = "HelixSR upscale" };
-            Camera.onPreCull += OnPreCull;
-            Camera.onPostRender += OnPostRender;
+            Camera.onPreCull += HandlePreCull;
+            Camera.onPostRender += HandlePostRender;
             Logger.LogInfo("HelixSR Unity bridge loaded; native upscaler " + (NativeBridge.IsReady ? "ready" : "not available, using scaled blit"));
         }
 
         private void OnDestroy()
         {
-            Camera.onPreCull -= OnPreCull;
-            Camera.onPostRender -= OnPostRender;
+            Camera.onPreCull -= HandlePreCull;
+            Camera.onPostRender -= HandlePostRender;
             if (_color != null) _color.Release();
             if (_output != null) _output.Release();
             if (_cmd != null) _cmd.Release();
@@ -64,7 +64,9 @@ namespace HelixSR.UnityBridge
             _output.Create();
         }
 
-        private void OnPreCull(Camera cam)
+        // Not named OnPreCull/OnPostRender: Unity treats those names on a MonoBehaviour as parameterless messages and
+        // logs "The message may not have any parameters" every frame (seen in Art of Rally's Player.log).
+        private void HandlePreCull(Camera cam)
         {
             if (!_enabled.Value || !IsTarget(cam)) return;
 
@@ -94,7 +96,7 @@ namespace HelixSR.UnityBridge
             if (rw != _lastRenderW || rh != _lastRenderH) { _lastRenderW = rw; _lastRenderH = rh; _frame = 0; }
         }
 
-        private void OnPostRender(Camera cam)
+        private void HandlePostRender(Camera cam)
         {
             if (cam == null || cam != _active) return;
             _active = null;

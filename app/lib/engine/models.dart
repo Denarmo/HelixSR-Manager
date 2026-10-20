@@ -50,6 +50,10 @@ class GameInfo {
   bool isReEngine = false;
   bool isInZoi = false;
 
+  /// Unity profile ([detectUnity]); null when the game is not a Unity game.
+  UnityInfo? unity;
+  bool get isUnity => unity != null;
+
   /// The folder HelixSR files go into.
   String get target => exeFolder ?? folder;
 
@@ -92,7 +96,53 @@ class GameInfo {
     ...inputs,
     if (isReEngine) 'RE ENGINE',
     if (isInZoi) 'INZOI',
+    if (isUnity) 'UNITY',
   ];
+}
+
+/// What [detectUnity] learned about a Unity game.
+class UnityInfo {
+  const UnityInfo({
+    this.version,
+    this.backend,
+    this.pipeline,
+    this.hasD3D12 = false,
+    this.hasBepInEx = false,
+  });
+
+  /// Engine version from the player's header, e.g. "6000.0.23f1".
+  final String? version;
+
+  /// "Mono" or "IL2CPP".
+  final String? backend;
+
+  /// "Built-in", "URP" or "HDRP".
+  final String? pipeline;
+
+  /// The build ships Unity's D3D12 player (`D3D12\D3D12Core.dll`).
+  final bool hasD3D12;
+  final bool hasBepInEx;
+
+  /// e.g. "Unity 6 · IL2CPP · URP".
+  String get summary => [
+    formatUnityVersion(version),
+    ?backend,
+    ?pipeline,
+    if (hasD3D12) 'D3D12',
+  ].join(' \u00B7 ');
+}
+
+/// "6000.0.23f1" -> "Unity 6", "6000.1.2f1" -> "Unity 6.1", "2022.3.10f1" -> "Unity 2022.3".
+String formatUnityVersion(String? version) {
+  if (version == null || version.isEmpty) return 'Unity';
+  final parts = version.split('.');
+  final major = parts.length < 2 ? null : int.tryParse(parts[0]);
+  if (major == null) return 'Unity $version';
+  if (major >= 6000) {
+    final unity = major ~/ 1000;
+    return parts[1] == '0' ? 'Unity $unity' : 'Unity $unity.${parts[1]}';
+  }
+  return 'Unity ${parts[0]}.${parts[1]}';
 }
 
 String fgModeTag(String mode) {

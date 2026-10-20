@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../engine/engine.dart';
 import 'engine_api.dart';
 
-enum GameFilter { all, installed, notInstalled, dlss, reEngine }
+enum GameFilter { all, installed, notInstalled, dlss, reEngine, unity }
 
 enum SortKey { title, status, route, version }
 
@@ -115,6 +115,8 @@ class AppModel extends ChangeNotifier {
           return g.inputs.contains('DLSS');
         case GameFilter.reEngine:
           return g.isReEngine;
+        case GameFilter.unity:
+          return g.isUnity;
       }
     }).toList();
     int cmp(GameInfo a, GameInfo b) {
@@ -146,6 +148,8 @@ class AppModel extends ChangeNotifier {
         return games.where((g) => g.inputs.contains('DLSS')).length;
       case GameFilter.reEngine:
         return games.where((g) => g.isReEngine).length;
+      case GameFilter.unity:
+        return games.where((g) => g.isUnity).length;
     }
   }
 

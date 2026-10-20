@@ -174,6 +174,7 @@ class _FilterRail extends StatelessWidget {
                     (GameFilter.notInstalled, 'Not installed'),
                     (GameFilter.dlss, 'DLSS'),
                     (GameFilter.reEngine, 'RE Engine'),
+                    (GameFilter.unity, 'Unity'),
                   ])
                     CheckFilter(
                       label: name,

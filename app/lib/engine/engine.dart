@@ -15,7 +15,15 @@ export 'ini.dart';
 export 'installer.dart';
 export 'models.dart';
 export 'paths.dart' show dataDir, homeDir, normalizePath;
-export 'scanner.dart' show scanAllGames, scanGame, detectInZoi, detectReEngine;
+export 'scanner.dart'
+    show
+        scanAllGames,
+        scanGame,
+        detectInZoi,
+        detectReEngine,
+        detectUnity,
+        detectUnityPipeline,
+        readUnityVersion;
 export 'settings.dart';
 export 'steam.dart' show getSteamLibraries, getSteamRoots;
 export 'system.dart';

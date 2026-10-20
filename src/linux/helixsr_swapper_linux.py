@@ -395,6 +395,130 @@ def detect_inzoi(game_folder, game_name, appid=None, exe_name=None):
     return "inzoi" in low_name
 
 
+# Unity engine profile: the player ships UnityPlayer.dll (Unity 2017.2+) and/or a "<exe>_Data" folder holding
+# globalgamemanagers / data.unity3d next to the game's .exe.
+UNITY_VERSION_RE = re.compile(r"(?<![\d.])((?:20\d\d|6\d{3}|5)\.\d{1,2}\.\d{1,3}[abfpx]\d{1,3})")
+UNITY_DATA_MARKERS = ("globalgamemanagers", "data.unity3d", "mainData")
+
+
+def _is_unity_data_folder(path):
+    return os.path.isdir(path) and any(os.path.isfile(os.path.join(path, m)) for m in UNITY_DATA_MARKERS)
+
+
+def _find_unity_data_folder(exe_dir, exe_name):
+    if exe_name:
+        named = os.path.join(exe_dir, os.path.splitext(exe_name)[0] + "_Data")
+        if _is_unity_data_folder(named):
+            return named
+    try:
+        for e in sorted(os.listdir(exe_dir)):
+            full = os.path.join(exe_dir, e)
+            if e.lower().endswith("_data") and _is_unity_data_folder(full):
+                return full
+    except Exception:
+        pass
+    return None
+
+
+def read_unity_version(data_dir):
+    """Engine version string from the header of the player's first serialized file / bundle
+    (for example "2022.3.10f1" or "6000.0.23f1")."""
+    for name in UNITY_DATA_MARKERS:
+        path = os.path.join(data_dir, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "rb") as f:
+                head = f.read(4096)
+            m = UNITY_VERSION_RE.search(head.decode("ascii", "replace"))
+            if m:
+                return m.group(1)
+        except Exception:
+            pass
+    return None
+
+
+def detect_unity_pipeline(data_dir, backend):
+    """Render pipeline from the scripting assemblies the build lists (ScriptingAssemblies.json, Unity 2020.2+) or ships
+    (Mono: Managed folder). None when it cannot be told (older IL2CPP builds)."""
+    assemblies = None
+    try:
+        list_path = os.path.join(data_dir, "ScriptingAssemblies.json")
+        if os.path.isfile(list_path):
+            with open(list_path, "r", encoding="utf-8", errors="replace") as f:
+                assemblies = f.read()
+    except Exception:
+        pass
+    if assemblies is None and backend == "Mono":
+        try:
+            managed = os.path.join(data_dir, "Managed")
+            if os.path.isdir(managed):
+                assemblies = "\n".join(e for e in os.listdir(managed) if e.lower().endswith(".dll"))
+        except Exception:
+            pass
+    if assemblies is None:
+        return None
+    low = assemblies.lower()
+    if "unity.renderpipelines.highdefinition.runtime" in low:
+        return "HDRP"
+    if "unity.renderpipelines.universal.runtime" in low:
+        return "URP"
+    return "Built-in"
+
+
+def format_unity_version(version):
+    """"6000.0.23f1" -> "Unity 6", "6000.1.2f1" -> "Unity 6.1", "2022.3.10f1" -> "Unity 2022.3"."""
+    if not version:
+        return "Unity"
+    parts = version.split(".")
+    if len(parts) < 2 or not parts[0].isdigit():
+        return "Unity " + version
+    major = int(parts[0])
+    if major >= 6000:
+        unity = major // 1000
+        return f"Unity {unity}" if parts[1] == "0" else f"Unity {unity}.{parts[1]}"
+    return f"Unity {parts[0]}.{parts[1]}"
+
+
+def detect_unity(exe_dir, exe_name):
+    """Unity profile of a game folder, or None when the game is not a Unity game."""
+    if not exe_dir or not os.path.isdir(exe_dir):
+        return None
+    data_dir = _find_unity_data_folder(exe_dir, exe_name)
+    has_player = os.path.isfile(os.path.join(exe_dir, "UnityPlayer.dll"))
+    if not has_player and data_dir is None:
+        return None
+
+    # Scripting backend: IL2CPP builds ship GameAssembly.dll, Mono builds ship <exe>_Data/Managed
+    backend = None
+    if os.path.isfile(os.path.join(exe_dir, "GameAssembly.dll")) or (data_dir and os.path.isdir(os.path.join(data_dir, "il2cpp_data"))):
+        backend = "IL2CPP"
+    elif data_dir and os.path.isfile(os.path.join(data_dir, "Managed", "Assembly-CSharp.dll")):
+        backend = "Mono"
+
+    version = read_unity_version(data_dir) if data_dir else None
+    pipeline = detect_unity_pipeline(data_dir, backend) if data_dir else None
+    # Unity's D3D12 player loads the Agility SDK from a "D3D12" folder next to the .exe
+    has_d3d12 = os.path.isfile(os.path.join(exe_dir, "D3D12", "D3D12Core.dll"))
+    has_bepinex = os.path.isdir(os.path.join(exe_dir, "BepInEx", "core"))
+
+    parts = [format_unity_version(version)]
+    if backend:
+        parts.append(backend)
+    if pipeline:
+        parts.append(pipeline)
+    if has_d3d12:
+        parts.append("D3D12")
+    return {
+        "version": version,
+        "backend": backend,
+        "pipeline": pipeline,
+        "hasD3D12": has_d3d12,
+        "hasBepInEx": has_bepinex,
+        "summary": " · ".join(parts),
+    }
+
+
 def get_inzoi_user_settings_path(game):
     """inZOI keeps its graphics options in %LOCALAPPDATA%\\BlueClient\\Saved\\Config\\Windows\\GameUserSettings.ini,
     which under Proton lives in the game's compatdata prefix."""
@@ -641,6 +765,7 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
     exe_folder = best_exe_dir or game_folder
     is_re = detect_re_engine(game_folder, name)
     is_inzoi = detect_inzoi(game_folder, name, appid, best_exe_name)
+    unity = detect_unity(exe_folder, best_exe_name)
     has_ref_file = os.path.isfile(os.path.join(exe_folder, "reframework_revision.txt")) or os.path.isfile(os.path.join(exe_folder, "dinput8.dll"))
     install_ref = is_re or has_ref_file
 
@@ -767,6 +892,8 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
         "foundXeLlPath": found_xe_ll_path,
         "isReEngine": is_re,
         "isInZoi": is_inzoi,
+        "isUnity": unity is not None,
+        "unity": unity,
         "installReFramework": install_ref,
         "installed": installed,
         "version": version,
@@ -2688,6 +2815,7 @@ def run_standalone_gui(smoke_test_ms=0):
                 ("direct", "🎯 Direct FSR 3.1"),
                 ("optiscaler", "🔌 OptiScaler Hook"),
                 ("reengine", "🧬 Capcom RE Engine"),
+                ("unity", "🧩 Unity"),
             ]
             for fkey, flabel in self.filter_pill_base_labels:
                 btn = tk.Button(
@@ -3007,6 +3135,7 @@ def run_standalone_gui(smoke_test_ms=0):
             direct = sum(1 for g in self.all_games if g.get("route") == "direct")
             opti = total - direct
             re_engine = sum(1 for g in self.all_games if g.get("isReEngine"))
+            unity = sum(1 for g in self.all_games if g.get("isUnity"))
 
             if hasattr(self, "lbl_game_count_badge"):
                 self.lbl_game_count_badge.configure(text=str(total))
@@ -3022,6 +3151,7 @@ def run_standalone_gui(smoke_test_ms=0):
                 "direct": direct,
                 "optiscaler": opti,
                 "reengine": re_engine,
+                "unity": unity,
             }
             for fkey, flabel in self.filter_pill_base_labels:
                 if fkey in self.filter_pill_btns:
@@ -3059,6 +3189,8 @@ def run_standalone_gui(smoke_test_ms=0):
                 if self.quick_filter == "optiscaler" and g.get("route") != "optiscaler":
                     continue
                 if self.quick_filter == "reengine" and not g.get("isReEngine"):
+                    continue
+                if self.quick_filter == "unity" and not g.get("isUnity"):
                     continue
 
                 res.append(g)
@@ -3189,6 +3321,8 @@ def run_standalone_gui(smoke_test_ms=0):
                 badges.append(("RE", "#b42828", "#ffffff"))
             if game.get("isInZoi"):
                 badges.append(("inZOI", "#7c3aed", "#ffffff"))
+            if game.get("isUnity"):
+                badges.append(("Unity", "#374151", "#ffffff"))
 
             for b_txt, b_bg, b_fg in badges:
                 tw = max(28, len(b_txt) * 7 + 12)

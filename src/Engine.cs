@@ -691,6 +691,7 @@ namespace HelixSRSwapper
             game.FsrTargets = fsrTargets;
             game.IsReEngine = DetectReEngine(gameFolder, game);
             game.IsInZoi = DetectInZoi(gameFolder, game);
+            DetectUnity(game);
             game.InstallReFramework = game.IsReEngine || File.Exists(Path.Combine(game.ExeFolder ?? gameFolder, "reframework_revision.txt"));
         }
 
@@ -1767,6 +1768,135 @@ namespace HelixSRSwapper
             }
 
             return false;
+        }
+
+        // Unity engine profile: the player ships UnityPlayer.dll (Unity 2017.2+) and/or a "<exe>_Data" folder holding
+        // globalgamemanagers / data.unity3d next to the game's .exe.
+        private static readonly Regex UnityVersionRegex = new Regex(@"(?<![\d.])((?:20\d\d|6\d{3}|5)\.\d{1,2}\.\d{1,3}[abfpx]\d{1,3})", RegexOptions.Compiled);
+
+        public static void DetectUnity(GameInfo game)
+        {
+            if (game == null) return;
+            string exeDir = game.ExeFolder ?? game.Folder;
+            if (string.IsNullOrEmpty(exeDir) || !Directory.Exists(exeDir)) return;
+
+            string dataDir = FindUnityDataFolder(exeDir, game.ExeName);
+            bool hasPlayer = File.Exists(Path.Combine(exeDir, "UnityPlayer.dll"));
+            if (!hasPlayer && dataDir == null) return;
+
+            game.IsUnity = true;
+
+            // Scripting backend: IL2CPP builds ship GameAssembly.dll, Mono builds ship <exe>_Data\Managed
+            if (File.Exists(Path.Combine(exeDir, "GameAssembly.dll")) || (dataDir != null && Directory.Exists(Path.Combine(dataDir, "il2cpp_data"))))
+                game.UnityBackend = "IL2CPP";
+            else if (dataDir != null && File.Exists(Path.Combine(dataDir, "Managed", "Assembly-CSharp.dll")))
+                game.UnityBackend = "Mono";
+
+            if (dataDir != null)
+            {
+                game.UnityVersion = ReadUnityVersion(dataDir);
+                game.UnityPipeline = DetectUnityPipeline(dataDir, game.UnityBackend);
+            }
+
+            // Unity's D3D12 player loads the Agility SDK from a "D3D12" folder next to the .exe
+            game.UnityHasD3D12 = File.Exists(Path.Combine(exeDir, "D3D12", "D3D12Core.dll"));
+            game.UnityHasBepInEx = Directory.Exists(Path.Combine(exeDir, "BepInEx", "core"));
+        }
+
+        private static string FindUnityDataFolder(string exeDir, string exeName)
+        {
+            if (!string.IsNullOrEmpty(exeName))
+            {
+                string named = Path.Combine(exeDir, Path.GetFileNameWithoutExtension(exeName) + "_Data");
+                if (IsUnityDataFolder(named)) return named;
+            }
+            try
+            {
+                foreach (var d in Directory.GetDirectories(exeDir, "*_Data", SearchOption.TopDirectoryOnly))
+                {
+                    if (IsUnityDataFolder(d)) return d;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static bool IsUnityDataFolder(string dir)
+        {
+            return Directory.Exists(dir) && (File.Exists(Path.Combine(dir, "globalgamemanagers")) || File.Exists(Path.Combine(dir, "data.unity3d")) || File.Exists(Path.Combine(dir, "mainData")));
+        }
+
+        /// <summary>
+        /// Reads the engine version string from the header of the player's first serialized file / bundle
+        /// (for example "2022.3.10f1" or "6000.0.23f1").
+        /// </summary>
+        public static string ReadUnityVersion(string dataDir)
+        {
+            foreach (var name in new[] { "globalgamemanagers", "data.unity3d", "mainData" })
+            {
+                string path = Path.Combine(dataDir, name);
+                if (!File.Exists(path)) continue;
+                try
+                {
+                    byte[] head = new byte[4096];
+                    int read;
+                    using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    {
+                        read = fs.Read(head, 0, head.Length);
+                    }
+                    var m = UnityVersionRegex.Match(Encoding.ASCII.GetString(head, 0, read));
+                    if (m.Success) return m.Groups[1].Value;
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Render pipeline from the scripting assemblies the build lists (ScriptingAssemblies.json, Unity 2020.2+) or ships
+        /// (Mono: Managed folder). Null when it cannot be told (older IL2CPP builds).
+        /// </summary>
+        public static string DetectUnityPipeline(string dataDir, string backend)
+        {
+            string assemblies = null;
+            try
+            {
+                string listPath = Path.Combine(dataDir, "ScriptingAssemblies.json");
+                if (File.Exists(listPath)) assemblies = File.ReadAllText(listPath);
+            }
+            catch { }
+
+            if (assemblies == null && backend == "Mono")
+            {
+                try
+                {
+                    string managed = Path.Combine(dataDir, "Managed");
+                    if (Directory.Exists(managed)) assemblies = string.Join("\n", Directory.GetFiles(managed, "*.dll", SearchOption.TopDirectoryOnly));
+                }
+                catch { }
+            }
+
+            if (assemblies == null) return null;
+            if (assemblies.IndexOf("Unity.RenderPipelines.HighDefinition.Runtime", StringComparison.OrdinalIgnoreCase) >= 0) return "HDRP";
+            if (assemblies.IndexOf("Unity.RenderPipelines.Universal.Runtime", StringComparison.OrdinalIgnoreCase) >= 0) return "URP";
+            return "Built-in";
+        }
+
+        /// <summary>
+        /// "6000.0.23f1" -> "Unity 6", "6000.1.2f1" -> "Unity 6.1", "2022.3.10f1" -> "Unity 2022.3".
+        /// </summary>
+        public static string FormatUnityVersion(string version)
+        {
+            if (string.IsNullOrEmpty(version)) return "Unity";
+            var parts = version.Split('.');
+            int major;
+            if (parts.Length < 2 || !int.TryParse(parts[0], out major)) return "Unity " + version;
+            if (major >= 6000)
+            {
+                int unity = major / 1000;
+                return parts[1] == "0" ? string.Format("Unity {0}", unity) : string.Format("Unity {0}.{1}", unity, parts[1]);
+            }
+            return string.Format("Unity {0}.{1}", parts[0], parts[1]);
         }
 
         // inZOI (KRAFTON, Unreal Engine 5): project name "BlueClient", Steam AppId 2456740

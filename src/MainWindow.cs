@@ -1542,6 +1542,7 @@ namespace HelixSRSwapper
             filterPillBar.Children.Add(CreateFilterPillButton("direct", "🎯 Direct FSR 3.1"));
             filterPillBar.Children.Add(CreateFilterPillButton("optiscaler", "🔌 OptiScaler Hook"));
             filterPillBar.Children.Add(CreateFilterPillButton("reengine", "🧬 Capcom RE Engine"));
+            filterPillBar.Children.Add(CreateFilterPillButton("unity", "🧩 Unity"));
             UpdateFilterPillVisuals();
             leftArea.Children.Add(filterPillBar);
 
@@ -3144,12 +3145,14 @@ namespace HelixSRSwapper
             int direct = 0;
             int opti = 0;
             int reEngine = 0;
+            int unity = 0;
 
             foreach (var g in _allGames)
             {
                 if (g.Installed) active++; else uninstalled++;
                 if (g.Route == "direct") direct++; else opti++;
                 if (g.IsReEngine) reEngine++;
+                if (g.IsUnity) unity++;
             }
 
             if (_txtStatTotal != null) _txtStatTotal.Text = total.ToString();
@@ -3163,6 +3166,7 @@ namespace HelixSRSwapper
             SetPillCount("direct", "🎯 Direct FSR 3.1", direct);
             SetPillCount("optiscaler", "🔌 OptiScaler Hook", opti);
             SetPillCount("reengine", "🧬 Capcom RE Engine", reEngine);
+            SetPillCount("unity", "🧩 Unity", unity);
         }
 
         private void SetPillCount(string key, string baseLabel, int count)
@@ -3202,6 +3206,7 @@ namespace HelixSRSwapper
                 if (_quickFilter == "direct" && g.Route != "direct") continue;
                 if (_quickFilter == "optiscaler" && g.Route != "optiscaler") continue;
                 if (_quickFilter == "reengine" && !g.IsReEngine) continue;
+                if (_quickFilter == "unity" && !g.IsUnity) continue;
 
                 filtered.Add(g);
             }
@@ -3368,6 +3373,20 @@ namespace HelixSRSwapper
                 };
                 zoiBadge.Child = new TextBlock { Text = "inZOI", FontSize = 9.5, FontWeight = FontWeights.Bold, Foreground = Brushes.White };
                 topPanel.Children.Add(zoiBadge);
+            }
+
+            if (game.IsUnity)
+            {
+                var unityBadge = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(220, 55, 65, 81)),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    Margin = new Thickness(0, 0, 4, 4),
+                    ToolTip = game.UnitySummary
+                };
+                unityBadge.Child = new TextBlock { Text = "Unity", FontSize = 9.5, FontWeight = FontWeights.Bold, Foreground = Brushes.White };
+                topPanel.Children.Add(unityBadge);
             }
             grid.Children.Add(topPanel);
 
@@ -4429,7 +4448,7 @@ namespace HelixSRSwapper
             SwitchTab(NavTabs[next]);
         }
 
-        private static readonly string[] QuickFilterKeys = new string[] { "all", "installed", "uninstalled", "optiscaler", "direct", "reengine" };
+        private static readonly string[] QuickFilterKeys = new string[] { "all", "installed", "uninstalled", "optiscaler", "direct", "reengine", "unity" };
 
         private void CycleFilters(int delta)
         {

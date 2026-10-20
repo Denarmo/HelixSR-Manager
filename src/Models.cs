@@ -65,6 +65,26 @@ namespace HelixSRSwapper
         public bool IsReEngine { get; set; }
         public bool IsInZoi { get; set; }
 
+        // Unity engine profile (filled by Engine.DetectUnity)
+        public bool IsUnity { get; set; }
+        public string UnityVersion { get; set; }   // e.g. "6000.0.23f1", "2022.3.10f1"; null when unknown
+        public string UnityBackend { get; set; }   // "Mono" or "IL2CPP"; null when unknown
+        public string UnityPipeline { get; set; }  // "Built-in", "URP" or "HDRP"; null when unknown
+        public bool UnityHasD3D12 { get; set; }    // the build ships Unity's D3D12 player (-force-d3d12 can work)
+        public bool UnityHasBepInEx { get; set; }  // a BepInEx mod loader is already installed
+        public string UnitySummary
+        {
+            get
+            {
+                if (!IsUnity) return null;
+                var parts = new List<string> { Engine.FormatUnityVersion(UnityVersion) };
+                if (!string.IsNullOrEmpty(UnityBackend)) parts.Add(UnityBackend);
+                if (!string.IsNullOrEmpty(UnityPipeline)) parts.Add(UnityPipeline);
+                if (UnityHasD3D12) parts.Add("D3D12");
+                return string.Join(" \u00B7 ", parts);
+            }
+        }
+
         public GameInfo()
         {
             Inputs = new List<string>();

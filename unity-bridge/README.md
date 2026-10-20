@@ -23,9 +23,14 @@ x86_64-w64-mingw32-g++ -std=c++17 -O2 -Wall -Wextra -shared -static-libgcc -stat
 
 ## Install for a test (Windows)
 
-BepInEx 5 (x64, Mono) unpacked into the game folder, then `HelixSRBridge.dll` (built from `src/*.cs` against the game's
-`UnityEngine.CoreModule.dll`/`UnityEngine.dll` and BepInEx's `BepInEx.dll`) in `BepInEx\plugins`, and `helixsr_unity.dll`
-next to the game's exe. The manager does not install any of this yet.
+1. Unpack BepInEx 5 (x64, [releases](https://github.com/BepInEx/BepInEx/releases), `BepInEx_win_x64_5.4.x.zip`) into the
+   game folder (next to the exe), start the game once and quit so `BepInEx\config` and `LogOutput.log` exist.
+2. Run `build-plugin.bat "<game folder>"`. It builds `BepInEx\plugins\HelixSRBridge.dll` with the .NET Framework `csc.exe`
+   that ships with Windows and copies `prebuilt\helixsr_unity.dll` (built from `native/` with mingw-w64) into the game folder.
+3. Start the game. Logs: `BepInEx\LogOutput.log`, `helixsr_unity.log` (game folder). Settings: `BepInEx\config\com.helixsr.unitybridge.cfg`.
+4. Undo: delete `winhttp.dll`, `doorstop_config.ini`, `BepInEx\`, `helixsr_unity.dll` and `helixsr_unity.log`.
+
+The manager does not install any of this yet.
 
 ## Testing on the Art of Rally PC
 

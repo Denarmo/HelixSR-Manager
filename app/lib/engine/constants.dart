@@ -2,7 +2,7 @@
 library;
 
 /// HelixSR Manager release version.
-const String appVersion = '1.2.0';
+const String appVersion = '2.0.0';
 
 /// Bundled upstream HelixSR core version (helixsr_core/HelixSR-x.y.z).
 const String coreVersion = '1.8.1';

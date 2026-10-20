@@ -23,7 +23,7 @@ PUBLIC_DIR = os.path.join(APP_DIR, "public")
 if not os.path.isdir(PUBLIC_DIR):
     PUBLIC_DIR = os.path.abspath(os.path.join(APP_DIR, "..", "..", "public"))
 
-APP_VERSION = "1.1.1"   # HelixSR Manager release
+APP_VERSION = "2.0.0"   # HelixSR Manager release
 CORE_VERSION = "1.8.1"  # bundled upstream HelixSR core (helixsr_core/HelixSR-x.y.z)
 
 CORE_DIR = os.path.join(APP_DIR, "helixsr_core", f"HelixSR-{CORE_VERSION}")

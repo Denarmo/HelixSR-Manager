@@ -4,6 +4,8 @@ library;
 
 export 'artwork.dart'
     show
+        dropSteamSoftware,
+        isSteamSoftware,
         resolveArtwork,
         resolveAppId,
         steamArtUrls,

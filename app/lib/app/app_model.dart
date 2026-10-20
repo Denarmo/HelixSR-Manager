@@ -80,7 +80,9 @@ class AppModel extends ChangeNotifier {
     scanning = true;
     notifyListeners();
     try {
-      games = await engine.scan(settings.customFolders);
+      games = await dropSteamSoftware(
+        await engine.scan(settings.customFolders),
+      );
       core = await engine.coreStatus();
       if (selected != null) {
         selected = games.where((g) => g.id == selected!.id).firstOrNull;

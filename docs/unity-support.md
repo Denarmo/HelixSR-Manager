@@ -53,7 +53,7 @@ One C# source tree, two build targets.
 
 ## First test game: Art of Rally
 
-Chosen by the project owner. What is known (not yet checked on an installed copy):
+Chosen by the project owner. Confirmed on the owner's installed copy by the manager's Unity detection and `Player.log`: Unity 2019.4.38f1, Mono, Built-in, no D3D12 player, no BepInEx, Direct3D 11 (feature level 11.1). The owner's GPU is an NVIDIA RTX 5070, so this PC validates the bridge's render-scale and input plumbing (with real DLSS once the native side exists) but not HelixSR itself; that needs an AMD machine. Earlier research notes:
 
 - Unity **2019.4.38** (from a third-party game profile; the manager's detector reads this from `globalgamemanagers`), D3D11 (inferred, same source). Unity 2019 has no shippable D3D12 player, so the **D3D11 path through OptiScaler is required**; the direct D3D12 path from phase 2 cannot be used here.
 - Likely Mono + Built-in pipeline (typical for a 2019 Unity game), which is what the plugin skeleton targets. First thing to do on a real install: run the manager's Unity detection on the game folder and confirm backend and pipeline.

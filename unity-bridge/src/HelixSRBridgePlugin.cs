@@ -1,7 +1,8 @@
-// HelixSR Unity bridge, phase 2 prototype: Mono + Built-in render pipeline (BepInEx 5).
-// NOT COMPILED OR RUN YET: needs BepInEx.Core and UnityEngine reference assemblies and a real game on AMD hardware.
-// The math is in HelixMath.cs (unit tested). See docs/unity-support.md.
-using System;
+// HelixSR Unity bridge, phase 2 prototype: Mono + Built-in render pipeline (BepInEx 5), D3D11 or D3D12.
+// Tested only for compilation against the stubs in ../stubs; needs a real game run. Math is unit tested (HelixMath.cs).
+// Flow per frame: jitter the projection, render the main camera into a render-scale target, then upscale to the screen.
+// The upscale is native (NativeBridge) when helixsr_unity.dll is ready, else a plain scaled blit so the whole
+// render-scale pipeline can be checked on any GPU before the native side exists. See docs/unity-support.md.
 using BepInEx;
 using BepInEx.Configuration;
 using UnityEngine;
@@ -9,32 +10,48 @@ using UnityEngine.Rendering;
 
 namespace HelixSR.UnityBridge
 {
-    [BepInPlugin("com.helixsr.unitybridge", "HelixSR Unity Bridge", "0.1.0")]
+    [BepInPlugin("com.helixsr.unitybridge", "HelixSR Unity Bridge", "0.2.0")]
     public class HelixSRBridgePlugin : BaseUnityPlugin
     {
         private ConfigEntry<HelixMath.Quality> _quality;
         private ConfigEntry<bool> _enabled;
         private int _frame;
+        private int _lastRenderW, _lastRenderH;
+        private RenderTexture _color;
+        private CommandBuffer _cmd;
+        private Camera _active;
+        private float _jx, _jy;
 
         private void Awake()
         {
             _enabled = Config.Bind("General", "Enabled", true, "Turn the bridge off without uninstalling it.");
             _quality = Config.Bind("General", "Quality", HelixMath.Quality.Quality, "DLSS quality mode HelixSR is driven with.");
+            _cmd = new CommandBuffer { name = "HelixSR upscale" };
             Camera.onPreCull += OnPreCull;
             Camera.onPostRender += OnPostRender;
-            Logger.LogInfo("HelixSR Unity bridge loaded");
+            Logger.LogInfo("HelixSR Unity bridge loaded; native upscaler " + (NativeBridge.IsReady ? "ready" : "not available, using scaled blit"));
         }
 
         private void OnDestroy()
         {
             Camera.onPreCull -= OnPreCull;
             Camera.onPostRender -= OnPostRender;
+            if (_color != null) _color.Release();
+            if (_cmd != null) _cmd.Release();
         }
 
         // Only the main game camera is upscaled; UI/overlay cameras are left alone.
         private static bool IsTarget(Camera cam)
         {
             return cam != null && cam == Camera.main && cam.cameraType == CameraType.Game && cam.targetTexture == null;
+        }
+
+        private void EnsureTarget(int w, int h)
+        {
+            if (_color != null && _color.width == w && _color.height == h) return;
+            if (_color != null) _color.Release();
+            _color = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "HelixSR color", filterMode = FilterMode.Bilinear };
+            _color.Create();
         }
 
         private void OnPreCull(Camera cam)
@@ -48,9 +65,9 @@ namespace HelixSR.UnityBridge
             cam.depthTextureMode |= DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
 
             // Sub-pixel jitter on the projection; the unjittered matrix stays available for motion vectors.
-            float jx, jy, nx, ny;
-            HelixMath.Jitter(_frame++, HelixMath.PhaseCount(rw, dispW), out jx, out jy);
-            HelixMath.JitterNdc(jx, jy, rw, rh, out nx, out ny);
+            float nx, ny;
+            HelixMath.Jitter(_frame++, HelixMath.PhaseCount(rw, dispW), out _jx, out _jy);
+            HelixMath.JitterNdc(_jx, _jy, rw, rh, out nx, out ny);
             cam.ResetProjectionMatrix();
             cam.nonJitteredProjectionMatrix = cam.projectionMatrix;
             Matrix4x4 p = cam.projectionMatrix;
@@ -58,16 +75,49 @@ namespace HelixSR.UnityBridge
             p.m12 += ny;
             cam.projectionMatrix = p;
             cam.useJitteredProjectionMatrixForTransparentRendering = true;
-
             Shader.SetGlobalFloat("_HelixSRMipBias", HelixMath.MipBias(rw, dispW));
+
+            // Render the scene at the lower resolution; the UI (overlay canvases) still draws at full resolution afterwards.
+            EnsureTarget(rw, rh);
+            cam.targetTexture = _color;
+            _active = cam;
+            if (rw != _lastRenderW || rh != _lastRenderH) { _lastRenderW = rw; _lastRenderH = rh; _frame = 0; }
         }
 
         private void OnPostRender(Camera cam)
         {
-            if (!_enabled.Value || !IsTarget(cam)) return;
-            // TODO(phase 2): render the camera into a render-scale target (RenderTexture of rw x rh), then issue
-            // CommandBuffer.IssuePluginEventAndData(helixsr_unity, color, depth, motion, jitter) so the native side
-            // upscales into the display-resolution target. Native side (helixsr_unity.dll) does not exist yet.
+            if (cam == null || cam != _active) return;
+            _active = null;
+            cam.targetTexture = null;
+            cam.ResetProjectionMatrix();
+
+            if (NativeBridge.IsReady)
+            {
+                var depth = Shader.GetGlobalTexture("_CameraDepthTexture");
+                var motion = Shader.GetGlobalTexture("_CameraMotionVectorsTexture");
+                if (depth != null && motion != null)
+                {
+                    var p = new EvaluateParams
+                    {
+                        color = _color.GetNativeTexturePtr(),
+                        depth = depth.GetNativeTexturePtr(),
+                        motion = motion.GetNativeTexturePtr(),
+                        output = System.IntPtr.Zero, // null target = the back buffer; the native side resolves it
+                        jitterX = _jx, jitterY = _jy,
+                        mvScaleX = _color.width, mvScaleY = _color.height,
+                        renderWidth = _color.width, renderHeight = _color.height,
+                        outputWidth = Screen.width, outputHeight = Screen.height,
+                        reset = _frame <= 1 ? 1 : 0,
+                    };
+                    _cmd.Clear();
+                    NativeBridge.Queue(_cmd, ref p);
+                    Graphics.ExecuteCommandBuffer(_cmd);
+                    return;
+                }
+            }
+
+            // Fallback: plain scaled blit to the back buffer.
+            Graphics.Blit(_color, (RenderTexture)null);
         }
     }
 }

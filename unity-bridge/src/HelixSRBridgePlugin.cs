@@ -17,7 +17,7 @@ namespace HelixSR.UnityBridge
         private ConfigEntry<bool> _enabled;
         private int _frame;
         private int _lastRenderW, _lastRenderH;
-        private RenderTexture _color;
+        private RenderTexture _color, _output;
         private CommandBuffer _cmd;
         private Camera _active;
         private float _jx, _jy;
@@ -37,6 +37,7 @@ namespace HelixSR.UnityBridge
             Camera.onPreCull -= OnPreCull;
             Camera.onPostRender -= OnPostRender;
             if (_color != null) _color.Release();
+            if (_output != null) _output.Release();
             if (_cmd != null) _cmd.Release();
         }
 
@@ -52,6 +53,15 @@ namespace HelixSR.UnityBridge
             if (_color != null) _color.Release();
             _color = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "HelixSR color", filterMode = FilterMode.Bilinear };
             _color.Create();
+        }
+
+        // Display-resolution target the native side writes into; it is then copied to the back buffer.
+        private void EnsureOutput(int w, int h)
+        {
+            if (_output != null && _output.width == w && _output.height == h) return;
+            if (_output != null) _output.Release();
+            _output = new RenderTexture(w, h, 0, RenderTextureFormat.ARGB32) { name = "HelixSR output", filterMode = FilterMode.Bilinear };
+            _output.Create();
         }
 
         private void OnPreCull(Camera cam)
@@ -97,12 +107,13 @@ namespace HelixSR.UnityBridge
                 var motion = Shader.GetGlobalTexture("_CameraMotionVectorsTexture");
                 if (depth != null && motion != null)
                 {
+                    EnsureOutput(Screen.width, Screen.height);
                     var p = new EvaluateParams
                     {
                         color = _color.GetNativeTexturePtr(),
                         depth = depth.GetNativeTexturePtr(),
                         motion = motion.GetNativeTexturePtr(),
-                        output = System.IntPtr.Zero, // null target = the back buffer; the native side resolves it
+                        output = _output.GetNativeTexturePtr(),
                         jitterX = _jx, jitterY = _jy,
                         mvScaleX = _color.width, mvScaleY = _color.height,
                         renderWidth = _color.width, renderHeight = _color.height,
@@ -112,6 +123,7 @@ namespace HelixSR.UnityBridge
                     _cmd.Clear();
                     NativeBridge.Queue(_cmd, ref p);
                     Graphics.ExecuteCommandBuffer(_cmd);
+                    Graphics.Blit(_output, (RenderTexture)null);
                     return;
                 }
             }

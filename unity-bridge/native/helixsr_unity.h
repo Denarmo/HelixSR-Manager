@@ -29,9 +29,12 @@ struct HelixSREvaluateParams
     int32_t reset;        // 1 on the first frame and after camera cuts
 };
 
-// 1 when the native side can evaluate (DLSS/HelixSR reachable), 0 when the managed fallback blit should run.
+// 1 when the native side can evaluate, 0 when the managed fallback blit should run.
 HELIXSR_API int32_t HelixSR_IsReady();
 
 // Render event callback for GL.IssuePluginEvent / CommandBuffer.IssuePluginEventAndData; data = HelixSREvaluateParams*.
 // Phase 3: call NVSDK_NGX_D3D11_* in nvngx.dll (OptiScaler's `Dx11Upscaler=fsr31_12` then runs HelixSR on a D3D12 device).
 HELIXSR_API void* HelixSR_GetEvaluateFunc();
+
+// Name of the active backend, for logs: "d3d11-diagnostic" (bilinear pass + input log) until NGX is wired in.
+HELIXSR_API const char* HelixSR_BackendName();

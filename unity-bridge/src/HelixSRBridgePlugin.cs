@@ -14,7 +14,8 @@ namespace HelixSR.UnityBridge
     public class HelixSRBridgePlugin : BaseUnityPlugin
     {
         private ConfigEntry<HelixMath.Quality> _quality;
-        private ConfigEntry<bool> _enabled, _jitter;
+        private ConfigEntry<bool> _enabled, _jitter, _msaa;
+        private int _colorAa = 1;
         private int _frame;
         private int _lastRenderW, _lastRenderH;
         private RenderTexture _color, _output;
@@ -26,12 +27,13 @@ namespace HelixSR.UnityBridge
         {
             _enabled = Config.Bind("General", "Enabled", true, "Turn the bridge off without uninstalling it.");
             _jitter = Config.Bind("Debug", "Jitter", true, "Sub-pixel camera jitter. Turn off to tell jitter shimmer (expected until a temporal upscaler resolves it) from other causes.");
+            _msaa = Config.Bind("General", "MatchGameMsaa", true, "Give the render-scale target the game's MSAA level. A camera rendering into a RenderTexture ignores QualitySettings.antiAliasing, so without this the game's MSAA is lost (jagged model edges).");
             _quality = Config.Bind("General", "Quality", HelixMath.Quality.Quality, "DLSS quality mode HelixSR is driven with.");
             _cmd = new CommandBuffer { name = "HelixSR upscale" };
             Camera.onPreCull += HandlePreCull;
             Camera.onPostRender += HandlePostRender;
             Logger.LogInfo("HelixSR Unity bridge loaded; native upscaler " + (NativeBridge.IsReady ? "ready" : "not available, using scaled blit")
-                + "; quality=" + _quality.Value + " jitter=" + _jitter.Value);
+                + "; quality=" + _quality.Value + " jitter=" + _jitter.Value + " msaa=" + _msaa.Value + " gameMsaa=" + QualitySettings.antiAliasing);
         }
 
         private void OnDestroy()
@@ -49,12 +51,21 @@ namespace HelixSR.UnityBridge
             return cam != null && cam == Camera.main && cam.cameraType == CameraType.Game && cam.targetTexture == null;
         }
 
+        // QualitySettings.antiAliasing is 0, 1 (off), 2, 4 or 8; RenderTexture.antiAliasing takes 1, 2, 4 or 8.
+        private int WantedAa()
+        {
+            return _msaa.Value ? Mathf.Clamp(QualitySettings.antiAliasing, 1, 8) : 1;
+        }
+
         private void EnsureTarget(int w, int h)
         {
-            if (_color != null && _color.width == w && _color.height == h) return;
+            int aa = WantedAa();
+            if (_color != null && _color.width == w && _color.height == h && _colorAa == aa) return;
             if (_color != null) _color.Release();
-            _color = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "HelixSR color", filterMode = FilterMode.Bilinear };
+            _color = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "HelixSR color", filterMode = FilterMode.Bilinear, antiAliasing = aa };
             _color.Create();
+            _colorAa = aa;
+            Logger.LogInfo("render target " + w + "x" + h + " msaa=" + aa);
         }
 
         // Display-resolution target the native side writes into; it is then copied to the back buffer.

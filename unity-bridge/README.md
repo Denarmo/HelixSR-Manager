@@ -8,7 +8,8 @@ Game-side half of Unity support, see [../docs/unity-support.md](../docs/unity-su
 | `src/HelixMath.cs` | DLSS render sizes, jitter phases, Halton jitter, mip bias. Unit tested. |
 | `src/HelixSRBridgePlugin.cs` | BepInEx 5 plugin, Mono + Built-in: jitters the projection, renders the main camera into a render-scale target, then upscales to the back buffer (native call, or a scaled blit when the native DLL is missing). **Compiles against the stubs; never run in a real game.** |
 | `src/NativeBridge.cs` | P/Invoke + `IssuePluginEventAndData` hand-off. Same compile-only status. |
-| `native/helixsr_unity.h` | Contract for the native plugin. **Not implemented.** Phase 3: call NGX D3D11 in OptiScaler's `nvngx.dll` (`Dx11Upscaler=fsr31_12`). |
+| `native/helixsr_unity.h` | Contract for the native plugin. |
+| `native/helixsr_unity.cpp` | D3D11 diagnostic backend (phase 3a): logs the real formats/sizes of color, depth and motion textures to `helixsr_unity.log` and upscales color into the output with a bilinear pass, saving and restoring the D3D11 state it touches. **Cross-compiles with mingw, never run.** Phase 3b: call NGX D3D11 in OptiScaler's `nvngx.dll` (`Dx11Upscaler=fsr31_12`) instead of the bilinear pass. |
 | `stubs/UnityStubs.cs` | Minimal UnityEngine/BepInEx stand-ins, only for the compile check. |
 
 Checks (from this folder):
@@ -16,7 +17,15 @@ Checks (from this folder):
 ```
 mcs -out:mt.exe src/HelixMath.cs tests/MathTest.cs && mono mt.exe          # math, expects ALL PASS
 mcs -target:library -out:bridge.dll src/*.cs stubs/UnityStubs.cs           # compile check only
+x86_64-w64-mingw32-g++ -std=c++17 -O2 -Wall -Wextra -shared -static-libgcc -static-libstdc++ \
+  -o helixsr_unity.dll native/helixsr_unity.cpp                              # needs g++-mingw-w64-x86-64
 ```
+
+## Install for a test (Windows)
+
+BepInEx 5 (x64, Mono) unpacked into the game folder, then `HelixSRBridge.dll` (built from `src/*.cs` against the game's
+`UnityEngine.CoreModule.dll`/`UnityEngine.dll` and BepInEx's `BepInEx.dll`) in `BepInEx\plugins`, and `helixsr_unity.dll`
+next to the game's exe. The manager does not install any of this yet.
 
 ## Testing on the Art of Rally PC
 

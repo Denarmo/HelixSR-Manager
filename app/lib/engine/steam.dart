@@ -131,29 +131,55 @@ Map<String, ManifestInfo> getSteamManifests() {
   return map;
 }
 
-/// Local library-cache art for [appId], or null. Remote URLs are built by
-/// [steamArtUrl].
+/// First file called [name] in [dir] or its sub-folders (Steam keeps newer
+/// art under `librarycache/<appid>/<hash>/`), two levels deep.
+String? _findCached(String dir, String name, [int depth = 0]) {
+  final direct = p.join(dir, name);
+  if (fileExists(direct)) return direct;
+  if (depth >= 2) return null;
+  for (final d in _subdirs(dir)) {
+    final hit = _findCached(d, name, depth + 1);
+    if (hit != null) return hit;
+  }
+  return null;
+}
+
+/// Local library-cache art for [appId], or null. Remote URLs come from
+/// artwork.dart. Only the real portrait cover (or hero); the landscape header
+/// is [findSteamHeader], used when nothing better exists.
 String? findSteamArtwork(String? appId, {bool hero = false}) {
   if (appId == null || appId.isEmpty) return null;
   final file = hero ? 'library_hero.jpg' : 'library_600x900.jpg';
   for (final root in getSteamRoots()) {
     final cache = p.join(root, 'appcache', 'librarycache');
-    final cands = [
-      p.join(cache, appId, file),
-      p.join(cache, '${appId}_$file'),
-      if (!hero) p.join(cache, appId, 'library_header.jpg'),
-    ];
-    for (final c in cands) {
-      if (fileExists(c)) return c;
-    }
+    final hit =
+        _findCached(p.join(cache, appId), file) ??
+        (fileExists(p.join(cache, '${appId}_$file'))
+            ? p.join(cache, '${appId}_$file')
+            : null);
+    if (hit != null) return hit;
   }
   final cached = p.join(
     dataDir(),
     'cache',
     'covers',
-    hero ? '${appId}_hero.jpg' : '${appId}_600x900.jpg',
+    hero ? '${appId}_hero_v2.jpg' : '${appId}_cover_v2.jpg',
   );
   return fileExists(cached) ? cached : null;
+}
+
+/// Landscape header from Steam's local cache, a last resort for a cover.
+String? findSteamHeader(String appId) {
+  for (final root in getSteamRoots()) {
+    final cache = p.join(root, 'appcache', 'librarycache');
+    for (final n in ['library_header.jpg', 'header.jpg']) {
+      final hit = _findCached(p.join(cache, appId), n);
+      if (hit != null) return hit;
+    }
+    final flat = p.join(cache, '${appId}_header.jpg');
+    if (fileExists(flat)) return flat;
+  }
+  return null;
 }
 
 String steamArtUrl(String appId, {bool hero = false}) =>

@@ -63,7 +63,7 @@ void main() {
     calls.clear();
     expect(await resolveAppId(g), '222'); // from disk, no network
     expect(calls, isEmpty);
-    expect(await resolveArtwork(g), endsWith('222_600x900.jpg'));
+    expect(await resolveArtwork(g), endsWith('222_cover_v2.jpg'));
   });
 
   test('unrelated search results are rejected', () async {
@@ -118,5 +118,49 @@ void main() {
     expect(names, isNot(contains('Steamworks Common Redistributables')));
     expect(names, isNot(contains('Left Over')));
     expect(names, isNot(contains('Over the Hill Expedition')));
+  });
+
+  test('Steam software is hidden, lookup failure keeps the entry', () async {
+    artworkFetchOverride = (u) async {
+      final id = u.queryParameters['appids'];
+      if (id == '1') {
+        return utf8.encode(jsonEncode({'1': {'data': {'type': 'game', 'genres': [{'id': '57'}]}}}));
+      }
+      if (id == '2') {
+        return utf8.encode(jsonEncode({'2': {'data': {'type': 'game', 'genres': [{'id': '1'}]}}}));
+      }
+      return null;
+    };
+    GameInfo steam(String id) => GameInfo(
+        id: id, name: id, folder: '/g/$id', appId: id, launcher: 'Steam');
+    final kept = await dropSteamSoftware([steam('1'), steam('2'), steam('3')]);
+    expect(kept.map((g) => g.appId), ['2', '3']);
+  });
+
+  test('hashed store assets are used when the plain CDN path has no cover',
+      () async {
+    final urls = <String>[];
+    artworkFetchOverride = (u) async {
+      urls.add('$u');
+      if (u.host == 'api.steampowered.com') {
+        return utf8.encode(jsonEncode({
+          'response': {
+            'store_items': [
+              {
+                'assets': {
+                  'asset_url_format': r'steam/apps/9/${FILENAME}?t=1',
+                  'library_capsule_2x': 'abc123/library_capsule_2x.jpg',
+                },
+              },
+            ],
+          },
+        }));
+      }
+      return u.path.contains('abc123') ? jpg : null;
+    };
+    final path = await resolveArtwork(game('B', appId: '9'));
+    expect(path, endsWith('9_cover_v2.jpg'));
+    expect(urls.any((u) => u.contains('/9/abc123/library_capsule_2x.jpg')),
+        isTrue);
   });
 }

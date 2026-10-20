@@ -277,21 +277,58 @@ Future<String?> _resolve(GameInfo game, bool hero) async {
 
   final dir = _coverDir();
   final target = File(
-    p.join(dir.path, hero ? '${id}_hero.jpg' : '${id}_600x900.jpg'),
+    p.join(dir.path, hero ? '${id}_hero_v2.jpg' : '${id}_cover_v2.jpg'),
   );
-  for (final url in steamArtUrls(id, hero: hero)) {
+  // Landscape stand-ins live in their own file so they never pass for the
+  // real cover, and are retried for a real one after a week.
+  final fallback = File(
+    p.join(dir.path, hero ? '${id}_hero_fb.jpg' : '${id}_cover_fb.jpg'),
+  );
+  var portraitSearch = true;
+  if (fallback.existsSync() &&
+      DateTime.now().difference(fallback.lastModifiedSync()).inDays < 7) {
+    portraitSearch = false;
+  }
+
+  Future<String?> save(String url, [File? to]) async {
     final bytes = await _get(Uri.parse(url));
-    if (bytes != null && _isImage(bytes)) {
-      try {
-        target.writeAsBytesSync(bytes);
-        return target.path;
-      } catch (_) {
-        return null;
-      }
+    if (bytes == null || !_isImage(bytes)) return null;
+    try {
+      (to ?? target).writeAsBytesSync(bytes);
+      return (to ?? target).path;
+    } catch (_) {
+      return null;
     }
   }
 
-  // Last resort: the header image the store page itself points at.
+  // Newer games keep their art under hashed paths that only the store's
+  // catalogue API knows; try those first.
+  if (portraitSearch) {
+    for (final url in await _storeAssetUrls(id, hero)) {
+      final saved = await save(url);
+      if (saved != null) return saved;
+    }
+    final portrait = hero
+        ? _names(hero: true).take(1)
+        : _names(hero: false).take(3);
+    for (final n in portrait) {
+      for (final cdn in _cdns) {
+        final saved = await save('$cdn/$id/$n');
+        if (saved != null) return saved;
+      }
+    }
+  } else {
+    return fallback.path;
+  }
+
+  // Landscape fallbacks, cropped by the UI: Steam's own cached header, then
+  // the other CDN names, then the header the store page points at.
+  final localHeader = hero ? null : findSteamHeader(id);
+  if (localHeader != null) return localHeader;
+  for (final url in steamArtUrls(id, hero: hero)) {
+    final saved = await save(url, fallback);
+    if (saved != null) return saved;
+  }
   final details = await _get(
     Uri.https('store.steampowered.com', '/api/appdetails', {
       'appids': id,
@@ -300,16 +337,108 @@ Future<String?> _resolve(GameInfo game, bool hero) async {
   );
   if (details != null) {
     try {
-      final j = jsonDecode(utf8.decode(details));
-      final header = j[id]?['data']?['header_image'];
-      if (header is String) {
-        final bytes = await _get(Uri.parse(header));
-        if (bytes != null && _isImage(bytes)) {
-          target.writeAsBytesSync(bytes);
-          return target.path;
-        }
-      }
+      final header = jsonDecode(
+        utf8.decode(details),
+      )[id]?['data']?['header_image'];
+      if (header is String) return await save(header, fallback);
     } catch (_) {}
   }
   return null;
+}
+
+/// Asset URLs from the store catalogue API (hashed file names), best first.
+Future<List<String>> _storeAssetUrls(String id, bool hero) async {
+  final bytes = await _get(
+    Uri.https('api.steampowered.com', '/IStoreBrowseService/GetItems/v1', {
+      'input_json': jsonEncode({
+        'ids': [
+          {'appid': int.tryParse(id) ?? 0},
+        ],
+        'context': {'language': 'english', 'country_code': 'US'},
+        'data_request': {'include_assets': true},
+      }),
+    }),
+  );
+  if (bytes == null) return [];
+  try {
+    final item = jsonDecode(utf8.decode(bytes))['response']['store_items'][0];
+    final assets = item['assets'] as Map;
+    final format = assets['asset_url_format'] as String;
+    final keys = hero
+        ? ['library_hero', 'library_hero_2x']
+        : ['library_capsule_2x', 'library_capsule'];
+    return [
+      for (final k in keys)
+        if (assets[k] is String && (assets[k] as String).isNotEmpty)
+          'https://shared.fastly.steamstatic.com/store_item_assets/'
+              '${format.replaceAll(r'${FILENAME}', assets[k] as String)}',
+    ];
+  } catch (_) {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Steam software that is not a game
+// ---------------------------------------------------------------------------
+
+File _typeCacheFile() => File(p.join(dataDir(), 'cache', 'apptypes.json'));
+
+/// Genre id 57 is "Utilities": Steam lists tools such as Lossless Scaling or
+/// ShaderGlass as apps, and some of them as type "game" too.
+const _softwareGenres = {'57'};
+
+/// Whether the store lists [appId] as software rather than a game. Cached on
+/// disk; false when the lookup fails, so an entry is never hidden by a
+/// network error.
+Future<bool> isSteamSoftware(String appId) async {
+  Map<String, dynamic> cache = {};
+  try {
+    final v = jsonDecode(_typeCacheFile().readAsStringSync());
+    if (v is Map<String, dynamic>) cache = v;
+  } catch (_) {}
+  final hit = cache[appId];
+  if (hit is bool) return hit;
+
+  final bytes = await _get(
+    Uri.https('store.steampowered.com', '/api/appdetails', {
+      'appids': appId,
+      'filters': 'basic,genres',
+    }),
+  );
+  if (bytes == null) return false;
+  try {
+    final data = jsonDecode(utf8.decode(bytes))[appId]?['data'];
+    if (data is! Map) return false;
+    final type = data['type'];
+    final genres = [
+      for (final g in (data['genres'] as List? ?? const []))
+        if (g is Map) '${g['id']}',
+    ];
+    final software =
+        (type is String && type != 'game') ||
+        genres.any(_softwareGenres.contains);
+    cache[appId] = software;
+    try {
+      _typeCacheFile().parent.createSync(recursive: true);
+      _typeCacheFile().writeAsStringSync(jsonEncode(cache));
+    } catch (_) {}
+    return software;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// [games] without Steam entries the store lists as software.
+Future<List<GameInfo>> dropSteamSoftware(List<GameInfo> games) async {
+  final flags = await Future.wait([
+    for (final g in games)
+      g.launcher == 'Steam' && g.appId != null
+          ? isSteamSoftware(g.appId!)
+          : Future.value(false),
+  ]);
+  return [
+    for (var i = 0; i < games.length; i++)
+      if (!flags[i]) games[i],
+  ];
 }

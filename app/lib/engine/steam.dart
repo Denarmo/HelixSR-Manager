@@ -114,12 +114,14 @@ Map<String, ManifestInfo> getSteamManifests() {
           final id = RegExp(r'"appid"\s+"(\d+)"').firstMatch(c);
           final nm = RegExp(r'"name"\s+"([^"]+)"').firstMatch(c);
           final dir = RegExp(r'"installdir"\s+"([^"]+)"').firstMatch(c);
+          final flags = RegExp(r'"StateFlags"\s+"(\d+)"').firstMatch(c);
           if (id != null && nm != null && dir != null) {
             map[dir.group(1)!.toLowerCase()] = ManifestInfo(
               id.group(1)!,
               nm.group(1)!,
               dir.group(1)!,
               p.dirname(steamapps),
+              stateFlags: int.tryParse(flags?.group(1) ?? '') ?? 4,
             );
           }
         } catch (_) {}

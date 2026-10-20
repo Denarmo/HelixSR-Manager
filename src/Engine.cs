@@ -1218,6 +1218,11 @@ namespace HelixSRSwapper
                         text = SetIniValue(text, "FGOutput", "auto", "FrameGen");
                     }
 
+                    // Everything above is preconfigured, so keep OptiScaler quiet in-game: no startup splash and no
+                    // "Update available" popup (the bundled OptiScaler is never the newest). Insert still opens the menu.
+                    text = SetIniValue(text, "DisableSplash", "true", "Menu");
+                    text = SetIniValue(text, "CheckForUpdate", "false", "Hotfix");
+
                     if (game.IsInZoi) text = ApplyInZoiOptiScalerIni(text);
 
                     File.WriteAllText(gameIni, text);

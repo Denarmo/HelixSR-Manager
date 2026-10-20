@@ -1348,6 +1348,11 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
                 txt = set_ini_value(txt, "FGInput", "auto", "FrameGen")
                 txt = set_ini_value(txt, "FGOutput", "nofg", "FrameGen")
 
+            # Everything above is preconfigured, so keep OptiScaler quiet in-game: no startup splash and no
+            # "Update available" popup (the bundled OptiScaler is never the newest). Insert still opens the menu.
+            txt = set_ini_value(txt, "DisableSplash", "true", "Menu")
+            txt = set_ini_value(txt, "CheckForUpdate", "false", "Hotfix")
+
             if game.get("isInZoi"):
                 txt = apply_inzoi_optiscaler_ini(txt)
 

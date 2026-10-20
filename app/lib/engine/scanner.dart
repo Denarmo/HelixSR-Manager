@@ -400,22 +400,46 @@ UnityInfo? detectUnity(String exeDir, String? exeName) {
   );
 }
 
-/// Folders such as "Steam Controller Configs" or a mod backup directory have
-/// no Steam manifest, no executable and no HelixSR files.
+/// Folders such as "Steam Controller Configs" or a mod backup directory (or
+/// the saves and caches an uninstalled game leaves behind) have no Steam
+/// manifest, no executable, no HelixSR files and no real game data.
 bool _isNotAGame(GameInfo g) =>
-    g.appId == null && g.exeName == null && !g.installed;
+    g.appId == null &&
+    g.exeName == null &&
+    !g.installed &&
+    !_hasGameData(g.folder);
 
-/// A user-added folder named like the start of a Steam game's title
-/// ("over the hill" vs "Over the Hill Expedition") is the same game.
-bool _duplicatesSteamGame(GameInfo g, List<GameInfo> existing) {
-  if (g.appId != null) return existing.any((e) => e.appId == g.appId);
+/// True when [dir] holds a file of at least 30 MB within the scan depth.
+bool _hasGameData(String dir, [int depth = 0]) {
+  if (depth > 6) return false;
+  try {
+    for (final e in Directory(dir).listSync(followLinks: false)) {
+      if (e is File) {
+        if (fileSize(e.path) >= 30 * 1024 * 1024) return true;
+      } else if (e is Directory && _hasGameData(e.path, depth + 1)) {
+        return true;
+      }
+    }
+  } catch (_) {}
+  return false;
+}
+
+/// Copies of one game: an entry without a Steam app id whose title is the
+/// start of (or starts with) another entry's title, with the same executable.
+bool _isDuplicate(GameInfo g, List<GameInfo> others) {
+  if (g.appId != null) return false;
   final mine = normalizeGameName(g.name).split(' ');
-  if (mine.length < 2) return false;
-  return existing.any((e) {
-    if (e.appId == null) return false;
+  return others.any((e) {
+    if (identical(e, g)) return false;
+    if (e.appId == null && e.name.compareTo(g.name) >= 0) return false;
+    if (e.appId != null && e.appId == g.appId) return true;
+    if (g.exeName != null && e.exeName != null && g.exeName != e.exeName) {
+      return false;
+    }
     final theirs = normalizeGameName(e.name).split(' ');
-    if (theirs.length < mine.length) return false;
-    for (var i = 0; i < mine.length; i++) {
+    final n = mine.length < theirs.length ? mine.length : theirs.length;
+    if (n < 2) return false;
+    for (var i = 0; i < n; i++) {
       if (mine[i] != theirs[i]) return false;
     }
     return true;
@@ -451,10 +475,12 @@ List<GameInfo> scanAllGames(List<String> customFolders) {
     final g = scanGame(norm, p.basename(norm), manifests);
     final exeKey = canonicalKey(g.exeFolder ?? '');
     if (exeKey.isNotEmpty && exeKey != key && !scanned.add(exeKey)) continue;
-    if (_isNotAGame(g) || _duplicatesSteamGame(g, result)) continue;
+    if (_isNotAGame(g)) continue;
     result.add(g);
   }
 
+  final dupes = result.where((g) => _isDuplicate(g, result)).toList();
+  result.removeWhere(dupes.contains);
   result.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
   return result;
 }

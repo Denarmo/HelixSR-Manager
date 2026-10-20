@@ -3,6 +3,9 @@
 // Flow per frame: jitter the projection, render the main camera into a render-scale target, then upscale to the screen.
 // The upscale is native (NativeBridge) when helixsr_unity.dll is ready, else a plain scaled blit so the whole
 // render-scale pipeline can be checked on any GPU before the native side exists. See docs/unity-support.md.
+using System;
+using System.Reflection;
+using System.Text;
 using BepInEx;
 using BepInEx.Configuration;
 using UnityEngine;
@@ -22,6 +25,8 @@ namespace HelixSR.UnityBridge
         private CommandBuffer _cmd;
         private Camera _active;
         private float _jx, _jy;
+        private string _lastDump;
+        private int _dumpCheckFrame;
 
         private void Awake()
         {
@@ -69,6 +74,55 @@ namespace HelixSR.UnityBridge
         }
 
         // Display-resolution target the native side writes into; it is then copied to the back buffer.
+        // Logs every camera with its components and command buffers whenever that picture changes. Art of Rally's own AA
+        // (TAA/SMAA/FXAA/off, per its settings menu) is most likely a Post Processing Stack v2 layer on the camera; this shows
+        // which components exist, the layer's antialiasingMode, and which camera events carry command buffers.
+        private void DumpCamerasIfChanged()
+        {
+            var sb = new StringBuilder();
+            sb.Append("QualitySettings.antiAliasing=").Append(QualitySettings.antiAliasing).Append(" cameras: ").Append(Camera.allCamerasCount).Append('\n');
+            foreach (Camera c in Camera.allCameras)
+            {
+                sb.Append("  camera '").Append(c.name).Append("' tag=").Append(c.tag).Append(" enabled=").Append(c.enabled)
+                  .Append(" depth=").Append(c.depth).Append(" size=").Append(c.pixelWidth).Append('x').Append(c.pixelHeight)
+                  .Append(" target=").Append(c.targetTexture != null ? "rt" : "screen").Append(" path=").Append(c.actualRenderingPath)
+                  .Append(" msaa=").Append(c.allowMSAA).Append(" hdr=").Append(c.allowHDR).Append('\n');
+                foreach (Behaviour b in c.GetComponents<Behaviour>())
+                {
+                    if (b == null) continue;
+                    Type t = b.GetType();
+                    sb.Append("    ").Append(t.FullName).Append(" enabled=").Append(b.enabled);
+                    if (t.Name == "PostProcessLayer") AppendMembers(sb, b, t, "antialiasingMode", "volumeLayer", "stopNaNPropagation");
+                    sb.Append('\n');
+                }
+                foreach (CameraEvent ev in Enum.GetValues(typeof(CameraEvent)))
+                {
+                    int n = c.GetCommandBuffers(ev).Length;
+                    if (n > 0) sb.Append("    command buffers at ").Append(ev).Append(": ").Append(n).Append('\n');
+                }
+            }
+            string text = sb.ToString();
+            if (text == _lastDump) return;
+            _lastDump = text;
+            Logger.LogInfo("camera dump (frame " + _frame + "):\n" + text);
+        }
+
+        private static void AppendMembers(StringBuilder sb, object o, Type t, params string[] names)
+        {
+            foreach (string n in names)
+            {
+                object v = null;
+                FieldInfo f = t.GetField(n, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (f != null) v = f.GetValue(o);
+                else
+                {
+                    PropertyInfo p = t.GetProperty(n, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (p != null) v = p.GetValue(o, null);
+                }
+                sb.Append(' ').Append(n).Append('=').Append(v == null ? "?" : v.ToString());
+            }
+        }
+
         private void EnsureOutput(int w, int h)
         {
             if (_output != null && _output.width == w && _output.height == h) return;
@@ -85,6 +139,8 @@ namespace HelixSR.UnityBridge
 
             int dispW = Screen.width, dispH = Screen.height, rw, rh;
             HelixMath.RenderSize(_quality.Value, dispW, dispH, out rw, out rh);
+
+            if (_frame >= _dumpCheckFrame) { _dumpCheckFrame = _frame + 60; DumpCamerasIfChanged(); }
 
             // Depth and motion vectors are what HelixSR (DLSS) needs besides color.
             cam.depthTextureMode |= DepthTextureMode.Depth | DepthTextureMode.MotionVectors;

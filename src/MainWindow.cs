@@ -3355,6 +3355,20 @@ namespace HelixSRSwapper
                 reBadge.Child = new TextBlock { Text = "RE", FontSize = 9.5, FontWeight = FontWeights.Bold, Foreground = Brushes.White };
                 topPanel.Children.Add(reBadge);
             }
+
+            if (game.IsInZoi)
+            {
+                var zoiBadge = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(220, 124, 58, 237)),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    Margin = new Thickness(0, 0, 4, 4),
+                    ToolTip = "inZOI profile: DLSS is selected in-game and OptiScaler gets the Unreal Engine AMD fixes on install"
+                };
+                zoiBadge.Child = new TextBlock { Text = "inZOI", FontSize = 9.5, FontWeight = FontWeights.Bold, Foreground = Brushes.White };
+                topPanel.Children.Add(zoiBadge);
+            }
             grid.Children.Add(topPanel);
 
             // Hover Quick-Action Pill Overlay

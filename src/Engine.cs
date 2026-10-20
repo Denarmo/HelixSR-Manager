@@ -690,6 +690,7 @@ namespace HelixSRSwapper
             game.Inputs = new List<string>(detectedInputs);
             game.FsrTargets = fsrTargets;
             game.IsReEngine = DetectReEngine(gameFolder, game);
+            game.IsInZoi = DetectInZoi(gameFolder, game);
             game.InstallReFramework = game.IsReEngine || File.Exists(Path.Combine(game.ExeFolder ?? gameFolder, "reframework_revision.txt"));
         }
 
@@ -1222,6 +1223,8 @@ namespace HelixSRSwapper
                     text = SetIniValue(text, "DisableSplash", "true", "Menu");
                     text = SetIniValue(text, "CheckForUpdate", "false", "Hotfix");
 
+                    if (game.IsInZoi) text = ApplyInZoiOptiScalerIni(text);
+
                     File.WriteAllText(gameIni, text);
                 }
 
@@ -1343,6 +1346,11 @@ namespace HelixSRSwapper
                 ClearShaderCache(game);
             }
 
+            if (game.IsInZoi)
+            {
+                ApplyInZoiUserSettings(game);
+            }
+
             if (game.InstallReFramework)
             {
                 InstallReFrameworkNightly(game);
@@ -1356,6 +1364,9 @@ namespace HelixSRSwapper
         private static void CleanupHelixSRFiles(GameInfo game)
         {
             if (game == null) return;
+
+            // inZOI: put back the game's own upscaler settings (install applies them again)
+            if (game.IsInZoi) RestoreInZoiUserSettings();
 
             // 1. Clean up OptiScaler route artifacts if present
             if (!string.IsNullOrEmpty(game.ExeFolder) && Directory.Exists(game.ExeFolder))
@@ -1756,6 +1767,175 @@ namespace HelixSRSwapper
             }
 
             return false;
+        }
+
+        // inZOI (KRAFTON, Unreal Engine 5): project name "BlueClient", Steam AppId 2456740
+        public const string InZoiAppId = "2456740";
+        private const string InZoiSettingsSection = "/Script/BlueClient.B1GameUserSettings";
+        private const string InZoiBackupFile = "GameUserSettings.helixsr-backup.json";
+        private static readonly string[] InZoiSettingKeys = { "DLSSValue", "DLSSG", "FSR3Value", "FSR3FI" };
+
+        public static bool DetectInZoi(string gameFolder, GameInfo game)
+        {
+            if (game != null && game.AppId == InZoiAppId) return true;
+            if (string.IsNullOrEmpty(gameFolder) || !Directory.Exists(gameFolder)) return false;
+
+            // 1. Unreal project folder "BlueClient" with its Win64 binaries
+            if (Directory.Exists(Path.Combine(gameFolder, "BlueClient", "Binaries", "Win64"))) return true;
+
+            // 2. Shipping executable name
+            if (game != null && !string.IsNullOrEmpty(game.ExeName))
+            {
+                string exe = game.ExeName.ToLowerInvariant();
+                if (exe.StartsWith("blueclient") || exe.StartsWith("inzoi")) return true;
+            }
+
+            // 3. Title / folder name
+            string name = (game != null && !string.IsNullOrEmpty(game.Name)) ? game.Name : Path.GetFileName(gameFolder);
+            return name.ToLowerInvariant().Replace(" ", "").Contains("inzoi");
+        }
+
+        /// <summary>
+        /// inZOI keeps its graphics options in %LOCALAPPDATA%\BlueClient\Saved\Config\Windows\GameUserSettings.ini.
+        /// </summary>
+        public static string GetInZoiUserSettingsPath()
+        {
+            string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            return Path.Combine(localApp, "BlueClient", "Saved", "Config", "Windows", "GameUserSettings.ini");
+        }
+
+        /// <summary>
+        /// OptiScaler.ini values for inZOI: OptiScaler's documented Unreal Engine on AMD fixes (resource barriers against
+        /// rainbow colors, forced auto exposure against crushed dark areas).
+        /// </summary>
+        public static string ApplyInZoiOptiScalerIni(string text)
+        {
+            text = SetIniValue(text, "AutoExposure", "true", "InitFlags");
+            text = SetIniValue(text, "ColorResourceBarrier", "4", "Hotfix");
+            text = SetIniValue(text, "MotionVectorResourceBarrier", "8", "Hotfix");
+            return text;
+        }
+
+        /// <summary>
+        /// Selects the in-game upscaler that feeds HelixSR: DLSS for the OptiScaler and DLSS loader routes, FSR 3 for the
+        /// direct route. The game's own values are saved next to the file and put back by RestoreInZoiUserSettings.
+        /// </summary>
+        public static void ApplyInZoiUserSettings(GameInfo game)
+        {
+            string cfgPath = GetInZoiUserSettingsPath();
+            if (!File.Exists(cfgPath)) return; // the game writes it on first launch; install again afterwards to apply
+
+            try
+            {
+                string text = File.ReadAllText(cfgPath);
+                string backupPath = Path.Combine(Path.GetDirectoryName(cfgPath), InZoiBackupFile);
+                if (!File.Exists(backupPath))
+                {
+                    var original = new Dictionary<string, object>();
+                    foreach (var key in InZoiSettingKeys) original[key] = GetUeIniValue(text, InZoiSettingsSection, key);
+                    File.WriteAllText(backupPath, Json.Serialize(original));
+                }
+
+                if (game.Route == "direct")
+                {
+                    int fsr;
+                    if (!int.TryParse(GetUeIniValue(text, InZoiSettingsSection, "FSR3Value"), out fsr) || fsr <= 0)
+                        text = SetUeIniValue(text, InZoiSettingsSection, "FSR3Value", "4"); // Quality
+                    text = SetUeIniValue(text, InZoiSettingsSection, "DLSSValue", "0");
+                    text = SetUeIniValue(text, InZoiSettingsSection, "DLSSG", "False");
+                }
+                else
+                {
+                    int dlss;
+                    if (!int.TryParse(GetUeIniValue(text, InZoiSettingsSection, "DLSSValue"), out dlss) || dlss <= 0)
+                        text = SetUeIniValue(text, InZoiSettingsSection, "DLSSValue", "4"); // Quality
+                    text = SetUeIniValue(text, InZoiSettingsSection, "FSR3Value", "0");
+                    text = SetUeIniValue(text, InZoiSettingsSection, "FSR3FI", "False");
+                    // DLSS-G only when OptiScaler translates it (DLSS-G input modes); it does not work with the DLSS loader
+                    bool dlssg = game.Route == "optiscaler" && !string.IsNullOrEmpty(game.FgMode) && game.FgMode.StartsWith("dlssg_");
+                    text = SetUeIniValue(text, InZoiSettingsSection, "DLSSG", dlssg ? "True" : "False");
+                }
+
+                File.WriteAllText(cfgPath, text);
+            }
+            catch { }
+        }
+
+        public static void RestoreInZoiUserSettings()
+        {
+            string cfgPath = GetInZoiUserSettingsPath();
+            string backupPath = Path.Combine(Path.GetDirectoryName(cfgPath), InZoiBackupFile);
+            if (!File.Exists(backupPath)) return;
+
+            try
+            {
+                if (File.Exists(cfgPath))
+                {
+                    var original = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(backupPath));
+                    string text = File.ReadAllText(cfgPath);
+                    foreach (var key in InZoiSettingKeys)
+                    {
+                        object val = (original != null && original.ContainsKey(key)) ? original[key] : null;
+                        text = val == null ? RemoveUeIniValue(text, InZoiSettingsSection, key) : SetUeIniValue(text, InZoiSettingsSection, key, val.ToString());
+                    }
+                    File.WriteAllText(cfgPath, text);
+                }
+                File.Delete(backupPath);
+            }
+            catch { }
+        }
+
+        private static Match FindUeIniSection(string text, string section)
+        {
+            // Section body runs from its header to the next header (or end of file)
+            return Regex.Match(text, string.Format(@"(?ms)^\[{0}\][ \t]*\r?\n(.*?)(?=^\[|\z)", Regex.Escape(section)));
+        }
+
+        public static string GetUeIniValue(string text, string section, string key)
+        {
+            var sec = FindUeIniSection(text, section);
+            if (!sec.Success) return null;
+            var m = Regex.Match(sec.Groups[1].Value, string.Format(@"(?m)^{0}[ \t]*=[ \t]*([^\r\n]*?)[ \t]*\r?$", Regex.Escape(key)));
+            return m.Success ? m.Groups[1].Value : null;
+        }
+
+        /// <summary>
+        /// Section-scoped "Key=Value" setter for Unreal Engine config files (no spaces around '=', unlike SetIniValue).
+        /// </summary>
+        public static string SetUeIniValue(string text, string section, string key, string value)
+        {
+            string line = string.Format("{0}={1}", key, value);
+            var sec = FindUeIniSection(text, section);
+            if (!sec.Success)
+            {
+                string sep = text.Length == 0 || text.EndsWith("\n") ? "" : "\r\n";
+                return text + sep + string.Format("[{0}]\r\n{1}\r\n", section, line);
+            }
+
+            var body = sec.Groups[1];
+            var keyRegex = new Regex(string.Format(@"(?m)^{0}[ \t]*=[^\r\n]*", Regex.Escape(key)));
+            string newBody;
+            if (keyRegex.IsMatch(body.Value))
+            {
+                newBody = keyRegex.Replace(body.Value, line.Replace("$", "$$"), 1);
+            }
+            else
+            {
+                // Append after the section's last non-empty line
+                string trimmed = body.Value.TrimEnd('\r', '\n');
+                string tail = body.Value.Substring(trimmed.Length);
+                newBody = (trimmed.Length > 0 ? trimmed + "\r\n" : "") + line + (tail.Length > 0 ? tail : "\r\n");
+            }
+            return text.Substring(0, body.Index) + newBody + text.Substring(body.Index + body.Length);
+        }
+
+        public static string RemoveUeIniValue(string text, string section, string key)
+        {
+            var sec = FindUeIniSection(text, section);
+            if (!sec.Success) return text;
+            var body = sec.Groups[1];
+            string newBody = Regex.Replace(body.Value, string.Format(@"(?m)^{0}[ \t]*=[^\r\n]*\r?\n?", Regex.Escape(key)), "");
+            return text.Substring(0, body.Index) + newBody + text.Substring(body.Index + body.Length);
         }
 
         public static void InstallReFrameworkNightly(GameInfo game)

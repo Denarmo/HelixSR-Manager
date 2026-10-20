@@ -93,8 +93,8 @@ void main() {
     void file(String path, [int size = 10]) => File('$common/$path')
       ..createSync(recursive: true)
       ..writeAsBytesSync(List.filled(size, 1));
-    file('HoloCure/data.win', 31 * 1024 * 1024);
-    file('HoloCure/version.ini');
+    file('HoloCure/HoloCure.exe', 2000);
+    file('Pragmata/cache.bin', 40 * 1024 * 1024);
     file('Bodycam/Saved/config.ini');
     file('Over the Hill/OverTheHill.exe', 2000);
     file('Over the Hill Expedition/OverTheHill.exe', 2000);
@@ -104,6 +104,7 @@ void main() {
     final names = scanAllGames([]).map((g) => g.name).toList();
     expect(names, containsAll(['HoloCure', 'Over the Hill']));
     expect(names, isNot(contains('Bodycam')));
+    expect(names, isNot(contains('Pragmata')));
     expect(names, isNot(contains('Over the Hill Expedition')));
   });
 }

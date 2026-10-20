@@ -400,29 +400,11 @@ UnityInfo? detectUnity(String exeDir, String? exeName) {
   );
 }
 
-/// Folders such as "Steam Controller Configs" or a mod backup directory (or
-/// the saves and caches an uninstalled game leaves behind) have no Steam
-/// manifest, no executable, no HelixSR files and no real game data.
+/// Folders such as "Steam Controller Configs", a mod backup directory, or the
+/// config and cache an uninstalled game leaves behind have no Steam manifest,
+/// no executable and no HelixSR files.
 bool _isNotAGame(GameInfo g) =>
-    g.appId == null &&
-    g.exeName == null &&
-    !g.installed &&
-    !_hasGameData(g.folder);
-
-/// True when [dir] holds a file of at least 30 MB within the scan depth.
-bool _hasGameData(String dir, [int depth = 0]) {
-  if (depth > 6) return false;
-  try {
-    for (final e in Directory(dir).listSync(followLinks: false)) {
-      if (e is File) {
-        if (fileSize(e.path) >= 30 * 1024 * 1024) return true;
-      } else if (e is Directory && _hasGameData(e.path, depth + 1)) {
-        return true;
-      }
-    }
-  } catch (_) {}
-  return false;
-}
+    g.appId == null && g.exeName == null && !g.installed;
 
 /// Copies of one game: an entry without a Steam app id whose title is the
 /// start of (or starts with) another entry's title, with the same executable.

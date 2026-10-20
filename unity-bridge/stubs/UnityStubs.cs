@@ -13,9 +13,11 @@ namespace UnityEngine {
   public enum CameraType { Game }
   [Flags] public enum DepthTextureMode { None = 0, Depth = 1, MotionVectors = 4 }
   public enum FilterMode { Bilinear }
+  public static class QualitySettings { public static int antiAliasing; }
+  public static class Mathf { public static int Clamp(int v, int a, int b) { return v < a ? a : v > b ? b : v; } }
   public enum RenderTextureFormat { ARGB32 }
   public class Texture : Object { public IntPtr GetNativeTexturePtr() { return IntPtr.Zero; } public FilterMode filterMode; }
-  public class RenderTexture : Texture { public int width, height; public RenderTexture(int w, int h, int d, RenderTextureFormat f) { width = w; height = h; } public void Create() { } public void Release() { } public static implicit operator bool(RenderTexture r) { return r != null; } }
+  public class RenderTexture : Texture { public int width, height, antiAliasing; public RenderTexture(int w, int h, int d, RenderTextureFormat f) { width = w; height = h; } public void Create() { } public void Release() { } public static implicit operator bool(RenderTexture r) { return r != null; } }
   public class Camera : Object { public static Camera main; public static event Action<Camera> onPreCull, onPostRender;
     public CameraType cameraType; public RenderTexture targetTexture; public DepthTextureMode depthTextureMode; public Matrix4x4 projectionMatrix, nonJitteredProjectionMatrix; public bool useJitteredProjectionMatrixForTransparentRendering;
     public void ResetProjectionMatrix() { } public static bool operator ==(Camera a, Camera b) { return object.ReferenceEquals(a, b); } public static bool operator !=(Camera a, Camera b) { return !object.ReferenceEquals(a, b); }

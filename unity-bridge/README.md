@@ -31,6 +31,9 @@ x86_64-w64-mingw32-g++ -std=c++17 -O2 -Wall -Wextra -shared -static-libgcc -stat
 4. Debug switches in the config file: `Jitter=false` removes the camera jitter. With the bilinear diagnostic upscale the jitter is
    expected to shimmer high-contrast edges (cars, crowd) because nothing resolves it; `Jitter=false` should make the image
    stable but soft. `Quality=DLAA` with `Jitter=false` is a control: the picture should look like the game without the bridge.
+   `MatchGameMsaa=true` (default) gives the render-scale target the game's MSAA level (a camera rendering into a RenderTexture
+   ignores `QualitySettings.antiAliasing`, which lost the game's MSAA in the first Art of Rally runs). `LogOutput.log` prints
+   `gameMsaa=` and the target's `msaa=`.
 5. Undo: delete `winhttp.dll`, `doorstop_config.ini`, `BepInEx\`, `helixsr_unity.dll` and `helixsr_unity.log`.
 
 The manager does not install any of this yet.

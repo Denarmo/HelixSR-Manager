@@ -190,12 +190,28 @@ namespace
 
         D3D11_TEXTURE2D_DESC cd, od;
         color->GetDesc(&cd); output->GetDesc(&od);
+        // With MSAA on the render target Unity can hand over the multisampled texture; resolve it into a plain one first.
+        Ref<ID3D11Texture2D> resolved;
+        ID3D11Texture2D* sampled = color;
+        if (cd.SampleDesc.Count > 1)
+        {
+            D3D11_TEXTURE2D_DESC rd2 = cd;
+            rd2.SampleDesc.Count = 1; rd2.SampleDesc.Quality = 0; rd2.MipLevels = 1;
+            rd2.BindFlags = D3D11_BIND_SHADER_RESOURCE; rd2.MiscFlags = 0; rd2.Usage = D3D11_USAGE_DEFAULT; rd2.CPUAccessFlags = 0;
+            if (FAILED(dev->CreateTexture2D(&rd2, nullptr, resolved.put())))
+            {
+                Log("MSAA color (%u samples): resolve target creation failed", cd.SampleDesc.Count);
+                return;
+            }
+            ctx->ResolveSubresource(resolved.p, 0, color, 0, ViewFormat(cd.Format));
+            sampled = resolved.p;
+        }
         D3D11_SHADER_RESOURCE_VIEW_DESC sv = {};
         sv.Format = ViewFormat(cd.Format); sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; sv.Texture2D.MipLevels = 1;
         D3D11_RENDER_TARGET_VIEW_DESC rv = {};
         rv.Format = ViewFormat(od.Format); rv.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
         Ref<ID3D11ShaderResourceView> srv; Ref<ID3D11RenderTargetView> rtv;
-        if (FAILED(dev->CreateShaderResourceView(color, &sv, srv.put())) || FAILED(dev->CreateRenderTargetView(output, &rv, rtv.put())))
+        if (FAILED(dev->CreateShaderResourceView(sampled, &sv, srv.put())) || FAILED(dev->CreateRenderTargetView(output, &rv, rtv.put())))
         {
             Log("view creation failed (color fmt %u, output fmt %u)", (unsigned)cd.Format, (unsigned)od.Format);
             return;

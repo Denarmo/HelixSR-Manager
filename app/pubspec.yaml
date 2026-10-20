@@ -1,0 +1,41 @@
+name: helixsr_manager
+description: "HelixSR Manager: install, configure and build HelixSR on Windows, Linux and SteamOS. Desktop and controller (console) UI."
+publish_to: 'none'
+version: 2.0.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  archive: ^4.5.2
+  file_selector: ^1.1.0
+  file_selector_linux: ^0.9.4+1
+  file_selector_windows: ^0.9.3+6
+  gamepads: ^0.1.12
+  path: ^1.9.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  # The brutalist faces (same as Dena.emu); OFL-1.1, see the OFL.txt next to
+  # each font. IBM Plex Mono for everything functional, Archivo Black for
+  # UPPERCASE display only.
+  fonts:
+    - family: IBM Plex Mono
+      fonts:
+        - asset: assets/fonts/ibm_plex_mono/IBMPlexMono-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/ibm_plex_mono/IBMPlexMono-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/ibm_plex_mono/IBMPlexMono-Bold.ttf
+          weight: 700
+    - family: Archivo Black
+      fonts:
+        - asset: assets/fonts/archivo_black/ArchivoBlack-Regular.ttf

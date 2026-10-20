@@ -14,7 +14,7 @@ namespace HelixSR.UnityBridge
     public class HelixSRBridgePlugin : BaseUnityPlugin
     {
         private ConfigEntry<HelixMath.Quality> _quality;
-        private ConfigEntry<bool> _enabled;
+        private ConfigEntry<bool> _enabled, _jitter;
         private int _frame;
         private int _lastRenderW, _lastRenderH;
         private RenderTexture _color, _output;
@@ -25,11 +25,13 @@ namespace HelixSR.UnityBridge
         private void Awake()
         {
             _enabled = Config.Bind("General", "Enabled", true, "Turn the bridge off without uninstalling it.");
+            _jitter = Config.Bind("Debug", "Jitter", true, "Sub-pixel camera jitter. Turn off to tell jitter shimmer (expected until a temporal upscaler resolves it) from other causes.");
             _quality = Config.Bind("General", "Quality", HelixMath.Quality.Quality, "DLSS quality mode HelixSR is driven with.");
             _cmd = new CommandBuffer { name = "HelixSR upscale" };
             Camera.onPreCull += HandlePreCull;
             Camera.onPostRender += HandlePostRender;
-            Logger.LogInfo("HelixSR Unity bridge loaded; native upscaler " + (NativeBridge.IsReady ? "ready" : "not available, using scaled blit"));
+            Logger.LogInfo("HelixSR Unity bridge loaded; native upscaler " + (NativeBridge.IsReady ? "ready" : "not available, using scaled blit")
+                + "; quality=" + _quality.Value + " jitter=" + _jitter.Value);
         }
 
         private void OnDestroy()
@@ -79,6 +81,7 @@ namespace HelixSR.UnityBridge
             // Sub-pixel jitter on the projection; the unjittered matrix stays available for motion vectors.
             float nx, ny;
             HelixMath.Jitter(_frame++, HelixMath.PhaseCount(rw, dispW), out _jx, out _jy);
+            if (!_jitter.Value) { _jx = 0f; _jy = 0f; }
             HelixMath.JitterNdc(_jx, _jy, rw, rh, out nx, out ny);
             cam.ResetProjectionMatrix();
             cam.nonJitteredProjectionMatrix = cam.projectionMatrix;

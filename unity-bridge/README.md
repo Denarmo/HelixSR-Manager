@@ -28,7 +28,10 @@ x86_64-w64-mingw32-g++ -std=c++17 -O2 -Wall -Wextra -shared -static-libgcc -stat
 2. Run `build-plugin.bat "<game folder>"`. It builds `BepInEx\plugins\HelixSRBridge.dll` with the .NET Framework `csc.exe`
    that ships with Windows and copies `prebuilt\helixsr_unity.dll` (built from `native/` with mingw-w64) into the game folder.
 3. Start the game. `helixsr_unity.log` now lists the jitter of the first 64 frames, then one line every 300 frames, plus motion-vector statistics (share of moving texels, mean/max motion in render pixels) at frame 60 and every 300 frames. Logs: `BepInEx\LogOutput.log`, `helixsr_unity.log` (game folder). Settings: `BepInEx\config\com.helixsr.unitybridge.cfg`.
-4. Undo: delete `winhttp.dll`, `doorstop_config.ini`, `BepInEx\`, `helixsr_unity.dll` and `helixsr_unity.log`.
+4. Debug switches in the config file: `Jitter=false` removes the camera jitter. With the bilinear diagnostic upscale the jitter is
+   expected to shimmer high-contrast edges (cars, crowd) because nothing resolves it; `Jitter=false` should make the image
+   stable but soft. `Quality=DLAA` with `Jitter=false` is a control: the picture should look like the game without the bridge.
+5. Undo: delete `winhttp.dll`, `doorstop_config.ini`, `BepInEx\`, `helixsr_unity.dll` and `helixsr_unity.log`.
 
 The manager does not install any of this yet.
 

@@ -43,6 +43,18 @@
 
 ---
 
+## 🆕 Flutter Edition (Brutalist UI + Console Mode)
+
+A new cross-platform Flutter app lives in [`app/`](app/README.md). It uses the Dena.emu brutalist design and ships two separate shells: a desktop UI (table/poster grid, inspector) and a full controller console UI (cover shelf, full-screen game page, d-pad folder browser, LB/RB paging, hold-A uninstall).
+
+| Desktop | Console |
+|---|---|
+| ![Desktop](docs/screenshots/flutter/desktop-library.png) | ![Console](docs/screenshots/flutter/console-games.png) |
+
+Build and run with `cd app && flutter run -d linux` (or `-d windows`). The WPF and Python editions remain. Note: the Dart engine mirrors `Engine.cs` as of this release; engine additions made elsewhere (for example Unity game support) are not ported yet.
+
+---
+
 ## 📸 Screenshots & UI Tour
 
 **HelixSR Manager** provides an identical, 100% standalone native desktop interface across both **Windows 10/11** and **Linux / SteamOS**.

@@ -43,7 +43,10 @@ Future<void> shot(WidgetTester tester, String name) async {
 }
 
 void main() {
-  setUpAll(loadFonts);
+  setUpAll(() {
+    artworkNetworkEnabled = false;
+    return loadFonts();
+  });
 
   group('desktop', () {
     testWidgets('library table, inspector and install', (tester) async {

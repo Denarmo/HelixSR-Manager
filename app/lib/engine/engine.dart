@@ -2,6 +2,17 @@
 /// Pure Dart (dart:io), no Flutter imports, so it also runs under `dart test`.
 library;
 
+export 'artwork.dart'
+    show
+        resolveArtwork,
+        resolveAppId,
+        steamArtUrls,
+        normalizeGameName,
+        prettifyFolderName,
+        nameQueries,
+        artworkFetchOverride,
+        artworkNetworkEnabled,
+        resetArtworkCaches;
 export 'constants.dart';
 export 'core.dart'
     show
@@ -14,7 +25,7 @@ export 'extras.dart' show clearShaderCache, inZoiUserSettingsPath;
 export 'ini.dart';
 export 'installer.dart';
 export 'models.dart';
-export 'paths.dart' show dataDir, homeDir, normalizePath;
+export 'paths.dart' show dataDir, dataDirOverride, homeDir, normalizePath;
 export 'scanner.dart'
     show
         scanAllGames,

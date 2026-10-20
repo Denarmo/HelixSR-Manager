@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import '../../engine/engine.dart';
 import '../brutal/brutal.dart';
 
-/// Steam cover art (local library cache first, then Steam's CDN) with a
-/// hatched file-name placeholder when there is none or the network is down.
-class GameCover extends StatelessWidget {
+/// Cover art with a hatched initials placeholder while it loads or when no
+/// source has any. Local files show at once; otherwise [resolveArtwork]
+/// finds the Steam app (by name for non-Steam games), downloads the image
+/// once and caches it.
+class GameCover extends StatefulWidget {
   const GameCover(
     this.game, {
     super.key,
@@ -22,32 +24,59 @@ class GameCover extends StatelessWidget {
   final bool border;
 
   @override
+  State<GameCover> createState() => _GameCoverState();
+}
+
+class _GameCoverState extends State<GameCover> {
+  String? _path;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(GameCover old) {
+    super.didUpdateWidget(old);
+    if (old.game.id != widget.game.id || old.hero != widget.hero) {
+      _path = null;
+      _load();
+    }
+  }
+
+  void _load() {
+    final g = widget.game;
+    final local = widget.hero ? g.localHeroPath : g.localCoverPath;
+    if (local != null && File(local).existsSync()) {
+      _path = local;
+      return;
+    }
+    final id = g.id;
+    final hero = widget.hero;
+    resolveArtwork(g, hero: hero).then((path) {
+      if (!mounted || path == null) return;
+      if (widget.game.id != id || widget.hero != hero) return;
+      setState(() => _path = path);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final t = context.brutal;
-    final local = hero ? game.localHeroPath : game.localCoverPath;
-    final remote = hero ? game.remoteHeroUrl : game.remoteCoverUrl;
-    Widget placeholder() => _Placeholder(game.name, hero: hero);
-    Widget img;
-    if (local != null && File(local).existsSync()) {
-      img = Image.file(
-        File(local),
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => placeholder(),
-      );
-    } else if (remote != null) {
-      img = Image.network(
-        remote,
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => placeholder(),
-        loadingBuilder: (c, child, p) => p == null ? child : placeholder(),
-      );
-    } else {
-      img = placeholder();
-    }
+    Widget placeholder() => _Placeholder(widget.game.name, hero: widget.hero);
+    final path = _path;
+    final img = path == null
+        ? placeholder()
+        : Image.file(
+            File(path),
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => placeholder(),
+          );
     return Container(
-      width: width,
-      height: height,
-      decoration: border
+      width: widget.width,
+      height: widget.height,
+      decoration: widget.border
           ? BoxDecoration(
               border: Border.all(color: t.ink, width: t.border),
             )

@@ -10,7 +10,11 @@ import 'package:path/path.dart' as p;
 bool get isWindows => Platform.isWindows;
 
 /// %LOCALAPPDATA%\HelixSR on Windows, $XDG_DATA_HOME/HelixSR elsewhere.
+/// Test hook: replaces [dataDir].
+String? dataDirOverride;
+
 String dataDir() {
+  if (dataDirOverride != null) return dataDirOverride!;
   final env = Platform.environment;
   if (isWindows) {
     final base = env['LOCALAPPDATA'] ?? env['USERPROFILE'] ?? '.';

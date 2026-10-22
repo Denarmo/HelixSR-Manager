@@ -14,7 +14,7 @@
 **[HelixSR](https://github.com/lonewolf0622/HelixSR)** (created by **[lonewolf0622](https://github.com/lonewolf0622)**) is a drop-in Direct3D 12 upscaler that executes **NVIDIA's DLSS Model E neural network** using standard Direct3D 12 compute shaders on **AMD RDNA GPUs** (RDNA 1, RDNA 2, RDNA 3, and RDNA 4) — **without requiring NVIDIA Tensor Cores, an NVIDIA GPU driver, CUDA, or ROCm**. It delivers native DLSS temporal reconstruction behavior (Halton `8 × scale²` camera jitter, native DLSS quality ratios from *Ultra Performance* to *DLAA*, dynamic resolution scaling, and zero forced sharpening) on hardware gamers already own.
 
 <p align="center">
-  <img src="docs/screenshots/library-grid.png" alt="HelixSR Manager — Neural Super Resolution Library" width="100%" />
+  <img src="docs/screenshots/flutter/desktop-library.png" alt="HelixSR Manager — Desktop Library" width="100%" />
 </p>
 
 > [!IMPORTANT]
@@ -57,32 +57,24 @@ Build and run with `cd app && flutter run -d linux` (or `-d windows`). The WPF a
 
 ## 📸 Screenshots & UI Tour
 
-**HelixSR Manager** provides an identical, 100% standalone native desktop interface across both **Windows 10/11** and **Linux / SteamOS**.
+**HelixSR Manager** ships a brutalist Flutter UI with two shells: a desktop UI for mouse and keyboard, and a full-screen console UI for controllers (Steam Deck, ROG Ally, Legion Go and couch setups).
 
-### 🎮 Games Library & Poster Grid View (Signature Dark Gold Theme)
-Automatically discovers Steam and custom game libraries, displays high-resolution box art, and tags every title with its detected upscaler APIs (`DLSS`, `DLSS-G`, `XeSS`, `FSR 2`, `FSR 3.1`) and engine telemetry (`Capcom RE Engine`).
+### 🖥️ Desktop Library & Inspector
+A sortable table (or poster grid) of every detected game with filters, status, route, detected upscaler inputs and installed HelixSR version. Select a game to open the inspector with the setup, INI and log actions, method choice (OptiScaler, Direct FSR 3.1, DLSS Loader) and proxy DLL selection.
 
-![HelixSR Manager Games Library Grid](docs/screenshots/library-grid.png)
+![Desktop Library and Inspector](docs/screenshots/flutter/desktop-library.png)
 
-### 🔌 Slide-Over Game Configuration Drawer & Hook Inspector
-Click any game card to open the slide-over inspector drawer. Choose between **OptiScaler Proxy hooks** (`dxgi.dll`, `winmm.dll`, `version.dll`, etc.), **Direct FSR 3.1 Replacement**, or the experimental **DLSS Loader**, configure **DLSS-G Frame Generation translation** (`XeFG`, `FSR-FG`, `Nukem's dlssg-to-fsr3`, `OptiFG`), toggle **FakeNVAPI** & **REFramework Nightly**, edit `OptiScaler.ini` live, or inspect runtime logs.
+### ⚙️ Settings
+Paper, Ink or System theme, accent colour, table or grid library view, and desktop or console interface (Auto switches on handhelds). Add extra game folders here.
 
-![HelixSR Manager Slide-Over Game Inspector Drawer](docs/screenshots/game-drawer.png)
+![Desktop Settings](docs/screenshots/flutter/desktop-settings-ink.png)
 
-### ⚡ HelixSR Core & Neural Network Compiler Wizard
-Compile NVIDIA's DLSS 310.7.0 Model E neural network weights and Direct3D 12 compute shaders (`Wave32` + `Wave64`) locally in one click—using either a local `nvngx_dlss.dll` found in your games or automatic download from NVIDIA's official GitHub—and auto-sync the embedded DLL across all installed games.
+### 🎮 Console Mode & Controller Navigation
+Toggle with <kbd>F11</kbd> or the Console button. Cover shelf, LB/RB paging, X to sort, Y to filter, A to open.
 
-![HelixSR Manager Neural Network Compiler Wizard](docs/screenshots/engine-compiler.png)
+![Console Library](docs/screenshots/flutter/console-games.png)
 
-### 🎮 Fullscreen Handheld Mode & Controller Navigation
-Designed for **Steam Deck**, **ROG Ally**, **Legion Go**, **MSI Claw**, and couch gaming. Automatically activates on SteamOS / Bazzite / Windows Xbox Handheld Mode (or via <kbd>F11</kbd> / controller **View** button) with high-contrast gold gamepad focus rings and a contextual bottom controller legend bar.
-
-![HelixSR Manager Fullscreen Handheld Mode](docs/screenshots/handheld-mode.png)
-
-### 📦 Custom FSR (`my-fsr`) & ☀️ Clean Light Theme
-| Custom FSR & Frame Gen Manager (`my-fsr`) | Clean Light Theme & RE Engine Inspector |
-| :---: | :---: |
-| ![Custom FSR Manager](docs/screenshots/custom-fsr.png) | ![Clean Light Theme](docs/screenshots/light-theme.png) |
+![Console Game Page](docs/screenshots/flutter/console-game.png)
 
 ---
 
@@ -145,7 +137,7 @@ Designed for **Steam Deck**, **ROG Ally**, **Legion Go**, **MSI Claw**, and couc
 
 HelixSR Manager v1.1.0+ includes a dedicated **Fullscreen Handheld Mode** engineered specifically for PC gaming handhelds such as the **Steam Deck**, **ASUS ROG Ally**, **Lenovo Legion Go**, **MSI Claw**, **AYANEO**, **GPD Win**, and **OneXPlayer**, as well as couch-gaming setups.
 
-![HelixSR Manager Handheld Mode & Controller Navigation](docs/screenshots/handheld-mode.png)
+![Console mode game page](docs/screenshots/flutter/console-game.png)
 
 ### 🤖 Automatic Handheld Environment Detection
 HelixSR Manager continuously inspects system telemetry upon startup and will **automatically switch into Handheld Mode** without any manual configuration when either of the following conditions is detected:

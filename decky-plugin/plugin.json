@@ -1,0 +1,11 @@
+{
+  "name": "HelixSR Manager",
+  "author": "Denarmo",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["upscaling", "fsr", "dlss", "optiscaler"],
+    "description": "Install, switch and remove HelixSR (DLSS Model E on AMD) per game from Game Mode. Companion to HelixSR Manager.",
+    "image": "https://raw.githubusercontent.com/Denarmo/HelixSR-Manager/main/docs/screenshots/flutter/console-game.png"
+  }
+}

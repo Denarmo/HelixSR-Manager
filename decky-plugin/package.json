@@ -1,0 +1,27 @@
+{
+  "name": "helixsr-decky",
+  "version": "1.0.0",
+  "description": "Decky Loader companion plugin for HelixSR Manager: install HelixSR per game from Game Mode.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c -w",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --no-warnings tests/launch-options.test.ts",
+    "package": "bash scripts/package.sh"
+  },
+  "devDependencies": {
+    "@decky/rollup": "1.0.2",
+    "@decky/ui": "4.16.5",
+    "@types/react": "18.3.31",
+    "rollup": "4.67.4",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@decky/api": "1.1.3",
+    "react-icons": "5.7.0",
+    "tslib": "2.9.1"
+  }
+}

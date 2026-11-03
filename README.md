@@ -53,6 +53,10 @@ A new cross-platform Flutter app lives in [`app/`](app/README.md). It uses the D
 
 Build and run with `cd app && flutter run -d linux` (or `-d windows`). The WPF and Python editions remain. Note: the Dart engine mirrors `Engine.cs` as of this release; engine additions made elsewhere (for example Unity game support) are not ported yet.
 
+## 🔌 Decky Plugin (SteamOS Game Mode)
+
+A companion [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin lives in [`decky-plugin/`](decky-plugin/README.md). From the Quick Access Menu it picks the running game, installs, switches or removes HelixSR with the same options as the desktop app (including the **FSR 4 Lite** model for handhelds), sets the Steam launch options for you, and can build the network on the device. Install it in Game Mode via Decky settings > Developer > Install Plugin from URL with `https://github.com/Denarmo/HelixSR-Manager/releases/download/decky-v1.0.0/helixsr-manager-decky.zip`.
+
 ---
 
 ## 📸 Screenshots & UI Tour

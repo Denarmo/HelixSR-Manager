@@ -16,6 +16,12 @@ String fgName(String mode) => switch (mode) {
   _ => mode,
 };
 
+String fsr4Name(String variant) => switch (variant) {
+  'full' => 'FSR 4',
+  'lite' => 'FSR 4 Lite (handheld)',
+  _ => variant,
+};
+
 /// Routes offered for [g]; the experimental loader only when the core has it.
 List<String> routeChoices(CoreStatus? core) => [
   'optiscaler',

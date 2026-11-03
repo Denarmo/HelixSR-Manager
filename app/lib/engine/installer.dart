@@ -99,6 +99,10 @@ void _installOptiScaler(GameInfo game, Core core, void Function(String) say) {
   rec['optiscaler'] = optiName;
   rec['fakenvapi'] = game.useFakeNvapi;
   rec['fg_mode'] = fgMode;
+  final fsr4Variant = fsr4Variants.contains(game.fsr4Variant)
+      ? game.fsr4Variant
+      : 'full';
+  rec['fsr4_variant'] = fsr4Variant;
 
   say('hooking $optiName');
   final currentTarget = p.join(t, optiName);
@@ -256,6 +260,14 @@ void _installOptiScaler(GameInfo game, Core core, void Function(String) say) {
     // Everything is preconfigured: no startup splash, no update popup.
     text = setIniValue(text, 'DisableSplash', 'true', 'Menu');
     text = setIniValue(text, 'CheckForUpdate', 'false', 'Hotfix');
+    // FSR 4 Lite: the INT8 model runs on handheld APUs / RDNA 2-3; "full"
+    // restores OptiScaler's default.
+    text = setIniValue(
+      text,
+      'Fsr4ForceEnableInt8',
+      fsr4Int8IniValue(fsr4Variant),
+      'FSR',
+    );
     if (game.isInZoi) text = applyInZoiOptiScalerIni(text);
     writeText(gameIni, text);
   }

@@ -58,7 +58,25 @@ it is listed by its version, for example "FSR 4.1.1". HelixSR stays the default 
 FSR 4 is listed only if the DLL supports your GPU.
 
 To go back: delete the DLL from this folder.
+
+Handheld / RDNA 2-3 GPU (Steam Deck, Legion Go S, ROG Ally...): set "FSR 4 model" to "FSR 4 Lite (handheld)" in
+HelixSR Manager and install again. That turns on the lighter INT8 FSR 4 model (Fsr4ForceEnableInt8 in
+OptiScaler.ini), so FSR 4 is listed and runs on GPUs without FP8 support.
 """
+
+# FSR 4 model OptiScaler uses when an FSR 4 DLL is picked in-game (OptiScaler route only).
+# "full" leaves OptiScaler's default (FP8 model, RDNA 4); "lite" forces the lighter INT8 model that runs on
+# handheld APUs and other RDNA 2/3 GPUs (Fsr4ForceEnableInt8 = true).
+FSR4_VARIANTS = [
+    {"id": "full", "label": "FSR 4"},
+    {"id": "lite", "label": "FSR 4 Lite (handheld)"},
+]
+FSR4_VARIANT_IDS = [v["id"] for v in FSR4_VARIANTS]
+
+
+def fsr4_int8_ini_value(variant):
+    """OptiScaler.ini [FSR] Fsr4ForceEnableInt8 value for an FSR 4 variant id."""
+    return "true" if variant == "lite" else "auto"
 
 SKIP_EXE_RE = re.compile(
     r"unins|setup|redist|crash|launcher|vc_?redist|dxsetup|easyanticheat|beservice|dotnet|helper|report|prereq|install|7z|ue4prereq|cefprocess|webhelper",
@@ -774,6 +792,7 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
     opti_dll_name = "dxgi.dll"
     use_fakenvapi = True
     fg_mode = "auto"
+    fsr4_variant = "full"
     has_backups = False
     has_logs = False
     has_myfsr = False
@@ -793,6 +812,8 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
                 use_fakenvapi = bool(mdata["fakenvapi"])
             if mdata.get("fg_mode"):
                 fg_mode = mdata["fg_mode"]
+            if mdata.get("fsr4_variant") in FSR4_VARIANT_IDS:
+                fsr4_variant = mdata["fsr4_variant"]
             if mdata.get("route") == "dlss":
                 dlss_installed = True
                 opti_installed = False
@@ -886,6 +907,7 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
         "optiDllName": opti_dll_name,
         "useFakeNvapi": use_fakenvapi,
         "fgMode": fg_mode,
+        "fsr4Variant": fsr4_variant,
         "hasDlssG": has_dlss_g,
         "foundFfxFgPath": found_ffx_fg_path,
         "foundXeFgPath": found_xe_fg_path,
@@ -1299,7 +1321,8 @@ def cleanup_helixsr_files(game):
                         pass
 
 
-def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenvapi=None, install_ref=None, fg_mode=None):
+def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenvapi=None, install_ref=None, fg_mode=None,
+                    fsr4_variant=None):
     st = get_core_status()
     if not st["weightsBuilt"]:
         raise RuntimeError(
@@ -1319,6 +1342,8 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
         game["installReFramework"] = bool(install_ref)
     if fg_mode:
         game["fgMode"] = fg_mode
+    if fsr4_variant in FSR4_VARIANT_IDS:
+        game["fsr4Variant"] = fsr4_variant
 
     active_fg_mode = game.get("fgMode") or "auto"
     if active_fg_mode.startswith("dlssg_"):
@@ -1342,6 +1367,7 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
             "optiscaler": opti_name,
             "fakenvapi": bool(game.get("useFakeNvapi", True)),
             "fg_mode": active_fg_mode,
+            "fsr4_variant": game.get("fsr4Variant") or "full",
             "helixsr": CORE_VERSION,
             "route": "optiscaler",
         }
@@ -1479,6 +1505,9 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
             # "Update available" popup (the bundled OptiScaler is never the newest). Insert still opens the menu.
             txt = set_ini_value(txt, "DisableSplash", "true", "Menu")
             txt = set_ini_value(txt, "CheckForUpdate", "false", "Hotfix")
+
+            # FSR 4 Lite: the INT8 model runs on handheld APUs / RDNA 2-3; "full" restores OptiScaler's default.
+            txt = set_ini_value(txt, "Fsr4ForceEnableInt8", fsr4_int8_ini_value(game.get("fsr4Variant")), "FSR")
 
             if game.get("isInZoi"):
                 txt = apply_inzoi_optiscaler_ini(txt)
@@ -3602,6 +3631,22 @@ def run_standalone_gui(smoke_test_ms=0):
             self.cmb_drawer_fg.pack(fill="x")
             self.cmb_drawer_fg.bind("<<ComboboxSelected>>", lambda _e: self._on_drawer_fg_changed())
 
+            self.var_chk_fsr4_lite = tk.BooleanVar(value=False)
+            self.chk_drawer_fsr4_lite = tk.Checkbutton(
+                self.panel_drawer_fg,
+                text="FSR 4 Lite (handheld): lighter INT8 FSR 4 model for Steam Deck / Legion Go / RDNA 2-3",
+                variable=self.var_chk_fsr4_lite,
+                bg=self.c_card,
+                fg=self.c_text,
+                selectcolor=self.c_surface2,
+                activebackground=self.c_card,
+                activeforeground=self.c_emerald,
+                font=("Sans", 8),
+                anchor="w",
+                command=self._on_drawer_check_changed,
+            )
+            self.chk_drawer_fsr4_lite.pack(fill="x", pady=(4, 0))
+
             self.var_chk_fakenvapi = tk.BooleanVar(value=True)
             self.chk_drawer_fakenvapi = tk.Checkbutton(
                 method_box,
@@ -4011,6 +4056,7 @@ def run_standalone_gui(smoke_test_ms=0):
                 self.cmb_drawer_fg.current(fg_idx)
 
                 self.var_chk_fakenvapi.set(bool(game.get("useFakeNvapi", True)))
+                self.var_chk_fsr4_lite.set(game.get("fsr4Variant") == "lite")
                 self.var_chk_reframework.set(bool(game.get("installReFramework", False)))
             finally:
                 self.updating_drawer = False
@@ -4045,6 +4091,7 @@ def run_standalone_gui(smoke_test_ms=0):
             if self.updating_drawer or not self.selected_game:
                 return
             self.selected_game["useFakeNvapi"] = bool(self.var_chk_fakenvapi.get())
+            self.selected_game["fsr4Variant"] = "lite" if self.var_chk_fsr4_lite.get() else "full"
             self.selected_game["installReFramework"] = bool(self.var_chk_reframework.get())
             self._update_drawer_method_summary()
 
@@ -4287,6 +4334,7 @@ def run_standalone_gui(smoke_test_ms=0):
                     use_fakenvapi=self.selected_game.get("useFakeNvapi"),
                     install_ref=self.selected_game.get("installReFramework"),
                     fg_mode=self.selected_game.get("fgMode"),
+                    fsr4_variant=self.selected_game.get("fsr4Variant"),
                 )
                 chosen = self.selected_game.get("routeDisplay") or "OptiScaler"
                 self._show_toast(f"Installed HelixSR [{chosen}] on {self.selected_game.get('name')}")

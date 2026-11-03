@@ -35,6 +35,10 @@ class GameInfo {
   /// "auto", "dlssg_xefg", "dlssg_fsrfg", "dlssg_nukems", "optifg_fsrfg".
   String fgMode = 'auto';
 
+  /// One of [fsr4Variants]: "full" (OptiScaler default) or "lite" (INT8
+  /// FSR 4 model for handhelds / RDNA 2-3).
+  String fsr4Variant = 'full';
+
   /// "optiscaler", "direct" or "dlss" (experimental HelixSR DLSS loader).
   String route = 'optiscaler';
 

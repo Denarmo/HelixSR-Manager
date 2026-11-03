@@ -104,6 +104,27 @@ void main() {
     expect(scanGame(g.folder, 'Beta', null).installed, isFalse);
   });
 
+  test('FSR 4 Lite writes the INT8 switch and survives a rescan', () async {
+    final g = makeGame('Lite', files: ['dxgi.dll']);
+    expect(g.fsr4Variant, 'full');
+    g.fsr4Variant = 'lite';
+    await installHelixSr(g);
+    final iniPath = p.join(g.target, 'OptiScaler.ini');
+    var ini = File(iniPath).readAsStringSync();
+    expect(ini, contains('[FSR]\r\nFsr4ForceEnableInt8 = true'));
+
+    final again = scanGame(g.folder, 'Lite', null);
+    expect(again.fsr4Variant, 'lite');
+
+    again.fsr4Variant = 'full';
+    await installHelixSr(again);
+    ini = File(iniPath).readAsStringSync();
+    expect(ini, contains('Fsr4ForceEnableInt8 = auto'));
+    expect(ini, isNot(contains('Fsr4ForceEnableInt8 = true')));
+    expect(scanGame(g.folder, 'Lite', null).fsr4Variant, 'full');
+    uninstallHelixSr(again);
+  });
+
   test('direct route swaps the game FSR dll and restores it', () async {
     final g = makeGame('Gamma', files: [dllSr]);
     g.route = 'direct';

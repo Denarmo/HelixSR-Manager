@@ -1,0 +1,52 @@
+name: Decky plugin
+
+on:
+  pull_request:
+    paths: ["decky-plugin/**", "src/linux/**", "helixsr_core/**", ".github/workflows/decky-plugin.yml"]
+  push:
+    branches: [main]
+    paths: ["decky-plugin/**", "src/linux/**", "helixsr_core/**", ".github/workflows/decky-plugin.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: decky-plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: decky-plugin/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: python3 -m unittest discover -s tests -v
+      - run: bash scripts/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helixsr-manager-decky
+          path: decky-plugin/out/*.zip
+      # On main: publish the zip as a GitHub release, so Decky's "Install Plugin from URL" can use it.
+      - name: Publish release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="decky-v$VERSION"
+          ZIP="out/helixsr-manager-decky-$VERSION.zip"
+          cp "$ZIP" out/helixsr-manager-decky.zip
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" out/helixsr-manager-decky.zip --clobber
+          else
+            gh release create "$TAG" "$ZIP" out/helixsr-manager-decky.zip \
+              --title "HelixSR Manager for Decky $VERSION" --latest=false \
+              --notes "Decky Loader plugin. Install it in Game Mode: Decky settings > Developer > Install Plugin from URL, or from the zip. See decky-plugin/README.md."
+          fi

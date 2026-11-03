@@ -35,7 +35,13 @@ You need Decky Loader installed (see its README). Then use one of these:
 
 **B. From a URL in Game Mode**
 
-Decky settings > **Developer** > **Install Plugin from URL**, and enter the zip's download link (for example a GitHub release asset).
+Decky settings > **Developer** > **Install Plugin from URL**, and enter:
+
+```
+https://github.com/Denarmo/HelixSR-Manager/releases/download/decky-v1.0.0/helixsr-manager-decky.zip
+```
+
+The `Decky plugin` GitHub workflow builds the zip and publishes it as the `decky-v<version>` release whenever the plugin, the Linux engine or the core changes on `main`.
 
 **C. From Desktop Mode or SSH**
 

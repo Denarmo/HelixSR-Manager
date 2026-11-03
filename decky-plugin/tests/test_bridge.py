@@ -123,6 +123,24 @@ class BridgeTest(unittest.TestCase):
         self.assertFalse(res["game"]["installed"])
         self.assertFalse(os.path.isfile(os.path.join(folder, "winmm.dll")))
 
+    def test_fsr4_lite_variant(self):
+        caps = self.call("capabilities")
+        ids = [v["id"] for v in caps["fsr4Variants"]]
+        if "lite" not in ids:
+            self.skipTest("engine has no FSR 4 variants")
+        core = os.path.join(self.bundle, self.core_ver)
+        for n in ("helixsr_weights.bin", "helixsr_kernels.pak"):
+            with open(os.path.join(core, n), "wb") as f:
+                f.write(b"x" * 16)
+        folder = os.path.join(self.common, "FakeDLSS")
+        res = self.call("install", {"folder": folder, "options": {"route": "optiscaler", "fsr4Variant": "lite"}})
+        self.assertTrue(res.get("success"), res)
+        self.assertEqual(res["game"]["fsr4Variant"], "lite")
+        with open(os.path.join(folder, "OptiScaler.ini"), encoding="utf-8", errors="ignore") as f:
+            self.assertRegex(f.read(), r"(?m)^Fsr4ForceEnableInt8\s*=\s*true")
+        res = self.call("install", {"folder": folder, "options": {"route": "optiscaler", "fsr4Variant": "full"}})
+        self.assertEqual(res["game"]["fsr4Variant"], "full")
+
     def test_settings_roundtrip_and_unknown_command(self):
         self.assertEqual(self.call("set_settings", {"settings": {"autoLaunchOptions": False}})["autoLaunchOptions"], False)
         self.assertEqual(self.call("get_settings")["autoLaunchOptions"], False)

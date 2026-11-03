@@ -25,6 +25,7 @@ namespace HelixSRSwapper
         public string FoundXeLlPath { get; set; }
         public bool HasDlssG { get; set; }
         public string FgMode { get; set; } // "auto", "dlssg_xefg", "dlssg_fsrfg", "dlssg_nukems", "optifg_fsrfg"
+        public string Fsr4Variant { get; set; } // "full" (OptiScaler default, FP8 / RDNA 4) or "lite" (INT8 FSR 4 for handhelds / RDNA 2-3)
         public string Route { get; set; } // "optiscaler", "direct" or "dlss" (experimental HelixSR DLSS loader)
         public string OptiDllName { get; set; } // "dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll", "d3d12.dll", "wininet.dll", "winhttp.dll", "OptiScaler.asi"
         public bool UseFakeNvapi { get; set; }
@@ -95,6 +96,7 @@ namespace HelixSRSwapper
             OptiDllName = "dxgi.dll";
             UseFakeNvapi = true;
             FgMode = "auto";
+            Fsr4Variant = "full";
         }
     }
 

@@ -126,6 +126,7 @@ namespace HelixSRSwapper
         private StackPanel _panelDrawerFg;
         private ComboBox _cmbDrawerFgMode;
         private System.Windows.Controls.CheckBox _chkDrawerFakeNvapi;
+        private System.Windows.Controls.CheckBox _chkDrawerFsr4Lite;
         private System.Windows.Controls.CheckBox _chkDrawerReFramework;
         private bool _updatingDrawerControls = false;
         private Button _btnDrawerInstall;
@@ -1908,6 +1909,18 @@ namespace HelixSRSwapper
             };
             _cmbDrawerFgMode.SelectionChanged += delegate { OnDrawerFgSelectionChanged(); };
             _panelDrawerFg.Children.Add(_cmbDrawerFgMode);
+            _chkDrawerFsr4Lite = new System.Windows.Controls.CheckBox
+            {
+                Content = "FSR 4 Lite (handheld): lighter INT8 FSR 4 model for Steam Deck / Legion Go / RDNA 2-3",
+                Foreground = TextMain,
+                FontSize = 11.5,
+                IsChecked = false,
+                Cursor = Cursors.Hand,
+                Margin = new Thickness(0, 6, 0, 0)
+            };
+            _chkDrawerFsr4Lite.Checked += delegate { if (!_updatingDrawerControls && _selectedGame != null) _selectedGame.Fsr4Variant = "lite"; };
+            _chkDrawerFsr4Lite.Unchecked += delegate { if (!_updatingDrawerControls && _selectedGame != null) _selectedGame.Fsr4Variant = "full"; };
+            _panelDrawerFg.Children.Add(_chkDrawerFsr4Lite);
             mStack.Children.Add(_panelDrawerFg);
 
             _chkDrawerFakeNvapi = new System.Windows.Controls.CheckBox
@@ -2263,6 +2276,7 @@ namespace HelixSRSwapper
                 _cmbDrawerFgMode.SelectedIndex = fgIdx;
 
                 _chkDrawerFakeNvapi.IsChecked = game.UseFakeNvapi;
+                _chkDrawerFsr4Lite.IsChecked = game.Fsr4Variant == "lite";
                 _chkDrawerReFramework.IsChecked = game.InstallReFramework;
             }
             finally

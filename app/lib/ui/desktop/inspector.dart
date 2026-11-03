@@ -195,6 +195,17 @@ class _InspectorState extends State<Inspector> {
             ),
           ),
           CfgRow(
+            'FSR 4 model',
+            control: CfgSegment<String>(
+              options: fsr4Variants,
+              value: g.fsr4Variant,
+              labelOf: fsr4Name,
+              onChanged: busy
+                  ? null
+                  : (v) => m.edit(g, (x) => x.fsr4Variant = v),
+            ),
+          ),
+          CfgRow(
             'FakeNvapi',
             control: CfgToggle(
               value: g.useFakeNvapi || g.fgMode.startsWith('dlssg_'),

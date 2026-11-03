@@ -223,6 +223,24 @@ class ConsoleGameScreen extends StatelessWidget {
                                   ),
                                   SizedBox(height: t.s3),
                                   ConsoleRow(
+                                    label: 'FSR 4 model',
+                                    value: fsr4Name(g.fsr4Variant),
+                                    sub: g.fsr4Variant == 'lite'
+                                        ? 'INT8 model for handhelds and RDNA 2/3'
+                                        : 'FP8 model, needs an RDNA 4 GPU',
+                                    onStep: busy
+                                        ? null
+                                        : (d) => model.edit(
+                                            g,
+                                            (x) => x.fsr4Variant = cycle(
+                                              fsr4Variants,
+                                              x.fsr4Variant,
+                                              d,
+                                            ),
+                                          ),
+                                  ),
+                                  SizedBox(height: t.s3),
+                                  ConsoleRow(
                                     label: 'FakeNvapi',
                                     value: g.useFakeNvapi || fgLocked
                                         ? 'on'

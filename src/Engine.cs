@@ -174,7 +174,16 @@ namespace HelixSRSwapper
         // "HXSRNET1" + uint64 weights size + uint64 kernels size + uint64 reserved.
         private static readonly byte[] EmbedMagic = Encoding.ASCII.GetBytes("HXSRNET1");
 
-        private const string MyFsrReadme = "Put an FSR upscaler DLL into this folder (for example FSR 4: amd_fidelityfx_upscaler_dx12.dll, any\r\nfile name) and start the game again. Only for this game.\r\n\r\nIn the game press Insert (OptiScaler's menu), then Upscaling tab > Upscalers > FFX Upscaler, and pick it there:\r\nit is listed by its version, for example \"FSR 4.1.1\". HelixSR stays the default (\"FSR HelixSR (3.1.5)\").\r\nFSR 4 is listed only if the DLL supports your GPU.\r\n\r\nTo go back: delete the DLL from this folder.\r\n";
+        private const string MyFsrReadme = "Put an FSR upscaler DLL into this folder (for example FSR 4: amd_fidelityfx_upscaler_dx12.dll, any\r\nfile name) and start the game again. Only for this game.\r\n\r\nIn the game press Insert (OptiScaler's menu), then Upscaling tab > Upscalers > FFX Upscaler, and pick it there:\r\nit is listed by its version, for example \"FSR 4.1.1\". HelixSR stays the default (\"FSR HelixSR (3.1.5)\").\r\nFSR 4 is listed only if the DLL supports your GPU.\r\n\r\nTo go back: delete the DLL from this folder.\r\n\r\nHandheld / RDNA 2-3 GPU (Steam Deck, Legion Go S, ROG Ally...): set \"FSR 4 model\" to \"FSR 4 Lite (handheld)\" in\r\nHelixSR Manager and install again. That turns on the lighter INT8 FSR 4 model (Fsr4ForceEnableInt8 in\r\nOptiScaler.ini), so FSR 4 is listed and runs on GPUs without FP8 support.\r\n";
+
+        // FSR 4 model OptiScaler uses when an FSR 4 DLL is picked in-game (OptiScaler route only). "full" keeps
+        // OptiScaler's default (FP8 model, RDNA 4); "lite" forces the lighter INT8 model for handheld APUs and RDNA 2/3.
+        public static readonly string[] Fsr4Variants = { "full", "lite" };
+
+        public static string Fsr4Int8IniValue(string variant)
+        {
+            return variant == "lite" ? "true" : "auto";
+        }
 
         private static readonly Regex SkipExe = new Regex(@"unins|setup|redist|crash|launcher|vc_?redist|dxsetup|easyanticheat|beservice|dotnet|helper|report|prereq|install|7z|ue4prereq|cefprocess|webhelper", RegexOptions.IgnoreCase);
 
@@ -715,6 +724,7 @@ namespace HelixSRSwapper
                             if (data.ContainsKey("optiscaler")) game.OptiDllName = data["optiscaler"].ToString();
                             if (data.ContainsKey("fakenvapi") && data["fakenvapi"] is bool) game.UseFakeNvapi = (bool)data["fakenvapi"];
                             if (data.ContainsKey("fg_mode") && data["fg_mode"] != null) game.FgMode = data["fg_mode"].ToString();
+                            if (data.ContainsKey("fsr4_variant") && data["fsr4_variant"] != null && Array.IndexOf(Fsr4Variants, data["fsr4_variant"].ToString()) >= 0) game.Fsr4Variant = data["fsr4_variant"].ToString();
                             if (data.ContainsKey("route") && data["route"] != null && data["route"].ToString() == "dlss")
                             {
                                 dlssInstalled = true;
@@ -1021,6 +1031,8 @@ namespace HelixSRSwapper
                 rec["optiscaler"] = optiName;
                 rec["fakenvapi"] = game.UseFakeNvapi;
                 rec["fg_mode"] = fgMode;
+                string fsr4Variant = Array.IndexOf(Fsr4Variants, game.Fsr4Variant ?? "") >= 0 ? game.Fsr4Variant : "full";
+                rec["fsr4_variant"] = fsr4Variant;
 
                 // Backup existing wrapper DLL if present
                 string currentTarget = Path.Combine(t, optiName);
@@ -1223,6 +1235,9 @@ namespace HelixSRSwapper
                     // "Update available" popup (the bundled OptiScaler is never the newest). Insert still opens the menu.
                     text = SetIniValue(text, "DisableSplash", "true", "Menu");
                     text = SetIniValue(text, "CheckForUpdate", "false", "Hotfix");
+
+                    // FSR 4 Lite: the INT8 model runs on handheld APUs / RDNA 2-3; "full" restores OptiScaler's default.
+                    text = SetIniValue(text, "Fsr4ForceEnableInt8", Fsr4Int8IniValue(fsr4Variant), "FSR");
 
                     if (game.IsInZoi) text = ApplyInZoiOptiScalerIni(text);
 

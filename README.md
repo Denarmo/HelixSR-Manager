@@ -257,6 +257,7 @@ Because NVIDIA's DLSS weights cannot be redistributed, you must compile them onc
    - **Direct FSR 3.1 Replacement**: Selectable for games with native FSR 3.1 DLLs (and Capcom RE Engine titles).
    - **Frame Generation (`DLSS-G Hook / OptiFG`)**: Choose whether to keep the game's default Frame Generation or hook in-game **DLSS Frame Generation** (`XeFG`, `FSR-FG`, `Nukem's dlssg-to-fsr3`, or `Universal OptiFG`).
    - **Deploy FakeNVAPI (`fakenvapi.dll`)**: Leave checked on AMD/Intel GPUs when using OptiScaler so the game allows selecting NVIDIA DLSS & DLSS Frame Generation in its menus.
+   - **FSR 4 model**: Pick **FSR 4 Lite (handheld)** on handhelds and other RDNA 2/3 GPUs to use the lighter INT8 FSR 4 model (see [FSR 4 Lite for handhelds](#-fsr-4-lite-for-handhelds)).
    - **Install REFramework Nightly (`dinput8.dll`)**: Automatically checked for detected Capcom RE Engine games to prevent startup or hook crashes.
 5. Click **⚡ Install HelixSR**.
 
@@ -324,6 +325,17 @@ For games installed via the **OptiScaler Route**, you can compare **HelixSR** si
    - Press <kbd>Insert</kbd> in-game to open OptiScaler's HUD.
    - Navigate to **Upscaling** → **Upscalers** → **FFX Upscaler**.
    - Switch instantly between **`FSR HelixSR (3.1.5)`** (the default), **`FSR 3.1.5`**, or your custom **`FSR 4.x.x`** DLL!
+
+### 🎮 FSR 4 Lite for handhelds
+
+The standard FSR 4 model needs FP8 hardware (RDNA 4). Handheld APUs such as the **Steam Deck, Legion Go S, ROG Ally** and other **RDNA 2/3** GPUs can run AMD's lighter **INT8 FSR 4 model** instead. Set **FSR 4 model** to **FSR 4 Lite (handheld)** for a game (desktop inspector, console game screen, or the Linux/Windows legacy drawer checkbox), then install or update HelixSR on it:
+
+| Option | `OptiScaler.ini` (`[FSR]`) | When to use |
+| :--- | :--- | :--- |
+| **FSR 4** *(default)* | `Fsr4ForceEnableInt8 = auto` | RDNA 4 desktop GPUs: OptiScaler's default FP8 model. |
+| **FSR 4 Lite (handheld)** | `Fsr4ForceEnableInt8 = true` | Handhelds and RDNA 2/3 GPUs: forces the INT8 model so FSR 4 shows up and runs at handheld-friendly cost. |
+
+HelixSR stays the default upscaler either way. Drop an FSR 4 DLL into `my-fsr` as above and pick it in OptiScaler's **FFX Upscaler** list. The choice is saved per game and kept on rescans and updates.
 
 ---
 

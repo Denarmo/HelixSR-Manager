@@ -196,6 +196,9 @@ void _scanDir(String dir, int depth, int maxDepth, _Walk w, GameInfo game) {
       if (data['fakenvapi'] is bool)
         game.useFakeNvapi = data['fakenvapi'] as bool;
       if (data['fg_mode'] != null) game.fgMode = '${data['fg_mode']}';
+      if (fsr4Variants.contains(data['fsr4_variant'])) {
+        game.fsr4Variant = '${data['fsr4_variant']}';
+      }
       if (data['route'] == 'dlss') {
         dlss = true;
         opti = false;

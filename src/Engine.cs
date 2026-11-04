@@ -1177,6 +1177,13 @@ namespace HelixSRSwapper
                 {
                     string text = File.ReadAllText(gameIni);
                     text = SetIniValue(text, "Dx12Upscaler", "fsr31", "Upscalers");
+                    // DX11 games (most Unity games, which default to Direct3D 11) reach HelixSR through DX11-on-12.
+                    // Without this OptiScaler falls back to its built-in FSR 2.2 and HelixSR never runs.
+                    text = SetIniValue(text, "Dx11Upscaler", "fsr31_12", "Upscalers");
+                    // OptiScaler turns DXGI GPU spoofing off for Unity by default, so Unity games with DLSS (for example
+                    // the TND upscaling framework) see an AMD / Intel GPU, never create DLSS and pick their own shader
+                    // upscaler, which OptiScaler cannot intercept. Spoofing brings the DLSS path back.
+                    if (UnityHasDlss(game)) text = SetIniValue(text, "Dxgi", "true", "Spoofing");
                     text = SetIniValue(text, "FfxDx12Path", Path.Combine(helixDir, OwnDll), "Libraries");
                     text = SetIniValue(text, "FfxDx12SRPath", Path.Combine(helixDir, OwnSrDll), "Libraries");
 
@@ -1788,6 +1795,13 @@ namespace HelixSRSwapper
         // Unity engine profile: the player ships UnityPlayer.dll (Unity 2017.2+) and/or a "<exe>_Data" folder holding
         // globalgamemanagers / data.unity3d next to the game's .exe.
         private static readonly Regex UnityVersionRegex = new Regex(@"(?<![\d.])((?:20\d\d|6\d{3}|5)\.\d{1,2}\.\d{1,3}[abfpx]\d{1,3})", RegexOptions.Compiled);
+
+        // True for a Unity game that ships NVIDIA's DLSS (nvngx_dlss.dll, usually in <exe>_Data\Plugins\x86_64).
+        public static bool UnityHasDlss(GameInfo game)
+        {
+            if (game == null || !game.IsUnity) return false;
+            return (game.Inputs != null && game.Inputs.Contains("DLSS")) || !string.IsNullOrEmpty(game.FoundNvngxDlssPath);
+        }
 
         public static void DetectUnity(GameInfo game)
         {

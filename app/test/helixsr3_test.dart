@@ -21,6 +21,16 @@ with open(os.path.join(release, "calls.jsonl"), "a") as f:
 if os.environ.get("FAKE_BRIDGE_FAIL"):
     print(json.dumps({"ok": False, "error": "no game found", "messages": []}))
     sys.exit(1)
+opts = dict(zip(rest[0::2], rest[1::2]))
+ini = os.path.join(release, "fake-scaler.ini")
+if cmd == "install" and opts.get("--way") == "scaler" and os.path.isfile(ini):
+    # what upstream's installer leaves in the game: its record and HelixSR
+    # Scaler's OptiScaler.ini
+    game = opts["--game"]
+    with open(os.path.join(game, "HelixSR-Scaler.files"), "w") as f:
+        f.write("# HelixSR Scaler, installed by HelixSR Desktop\nname=dxgi.dll\ndxgi.dll\n")
+    with open(ini, "rb") as src, open(os.path.join(game, "OptiScaler.ini"), "wb") as dst:
+        dst.write(src.read())
 print("noise")
 print(json.dumps({"protocol": 1, "ok": True, "messages": ["installed"]}))
 ''';
@@ -231,6 +241,59 @@ void main() {
     g.installed = true;
     uninstallHelixSr(g);
     expect(calls().last, ['remove', '--game', normalizePath(dir)]);
+  });
+
+  group('HelixSR Scaler in Unity games', () {
+    const scalerIni =
+        '[Upscalers]\r\nDx11Upscaler=auto\r\n\r\n[Spoofing]\r\n'
+        'StreamlineSpoofing=auto\r\nDxgi=auto\r\nDxgiFactoryWrapping=auto\r\n';
+
+    String unityGame(String name, {bool dlss = true}) => makeGame(
+      name,
+      files: {
+        'UnityPlayer.dll': [0x4d, 0x5a],
+        'game_Data/globalgamemanagers': [0],
+        if (dlss) 'game_Data/Plugins/x86_64/nvngx_dlss.dll': [0x4d, 0x5a],
+        if (!dlss) 'amd_fidelityfx_dx12.dll': [0x4d, 0x5a],
+      },
+    );
+
+    Future<(String, List<String>)> install(String dir, String ini) async {
+      makeRelease();
+      write(p.join(release, 'fake-scaler.ini'), utf8.encode(ini));
+      final g = scanGame(dir, null, {})..route = 'scaler';
+      final lines = <String>[];
+      await installHelixSr(g, log: lines.add);
+      return (File(p.join(dir, 'OptiScaler.ini')).readAsStringSync(), lines);
+    }
+
+    test('turns DXGI spoofing on when it is on auto', () async {
+      final dir = unityGame('UnityScaler');
+      expect(scanGame(dir, null, {}).unityHasDlss, isTrue);
+      final (ini, lines) = await install(dir, scalerIni);
+      expect(ini, contains('\r\nDxgi=true\r\n'));
+      expect(ini, contains('DxgiFactoryWrapping=auto'));
+      // HelixSR Scaler runs DX11 through HelixSR on auto (ffx_12).
+      expect(ini, contains('Dx11Upscaler=auto'));
+      expect(lines.join('\n'), contains('GPU spoofing'));
+    });
+
+    test("keeps the user's own choice", () async {
+      final (ini, _) = await install(
+        unityGame('UnityOff'),
+        scalerIni.replaceFirst('Dxgi=auto', 'Dxgi=false'),
+      );
+      expect(ini, contains('Dxgi=false'));
+      expect(ini, isNot(contains('Dxgi=true')));
+    });
+
+    test('leaves Unity games without DLSS alone', () async {
+      final (ini, _) = await install(
+        unityGame('UnityFsr', dlss: false),
+        scalerIni,
+      );
+      expect(ini, contains('Dxgi=auto'));
+    });
   });
 
   test('install refuses an unbuilt release', () async {

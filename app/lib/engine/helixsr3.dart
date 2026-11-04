@@ -21,6 +21,7 @@ import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 
 import 'constants.dart';
+import 'ini.dart';
 import 'models.dart';
 import 'paths.dart';
 
@@ -503,7 +504,47 @@ List<String> helixSr3Install(GameInfo game) {
         'scaler-name': name,
     },
   );
-  return [for (final m in (out['messages'] as List? ?? const [])) '$m'];
+  final messages = [
+    for (final m in (out['messages'] as List? ?? const [])) '$m',
+  ];
+  if (game.route == 'scaler' && scalerUnitySpoofing(game)) {
+    messages.add(
+      'Unity game with DLSS: GPU spoofing turned on in OptiScaler.ini',
+    );
+  }
+  return messages;
+}
+
+/// HelixSR Scaler is upstream's OptiScaler build, and OptiScaler turns DXGI
+/// GPU spoofing off for Unity games by default. A Unity game with DLSS then
+/// sees an AMD / Intel GPU, never creates DLSS and uses its own upscaler, so
+/// HLX DLSS never runs. Sets [Spoofing] Dxgi=true in the game's
+/// OptiScaler.ini, only while it is on auto (a value the user picked in
+/// HelixSR Scaler's menu stays). Upstream keeps OptiScaler.ini across
+/// updates. True when written.
+bool scalerUnitySpoofing(GameInfo game) {
+  if (!game.unityHasDlss) return false;
+  for (final d in {game.target, game.folder}) {
+    if (readScalerRecord(d) == null) continue;
+    final ini = p.join(d, 'OptiScaler.ini');
+    if (!fileExists(ini)) return false;
+    var text = readText(ini);
+    final m = RegExp(
+      r'^[ \t]*Dxgi[ \t]*=[ \t]*([^\r\n]*)',
+      multiLine: true,
+    ).firstMatch(text);
+    final cur = m?.group(1)?.trim().toLowerCase() ?? '';
+    if (cur.isNotEmpty && cur != 'auto') return false;
+    text = setIniValue(
+      text,
+      'Dxgi',
+      'true',
+      'Spoofing',
+    ).replaceFirst(RegExp(r'^Dxgi = true', multiLine: true), 'Dxgi=true');
+    writeText(ini, text);
+    return true;
+  }
+  return false;
 }
 
 void helixSr3Remove(GameInfo game) =>

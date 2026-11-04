@@ -166,6 +166,32 @@ class BridgeTest(unittest.TestCase):
         self.assertFalse(res["game"]["installed"])
         self.assertFalse(os.path.isfile(os.path.join(folder, "winmm.dll")))
 
+    def read_ini(self, folder):
+        with open(os.path.join(folder, "OptiScaler.ini"), encoding="utf-8", errors="ignore") as f:
+            return f.read()
+
+    def test_unity_dlss_game_gets_dxgi_spoofing(self):
+        # OptiScaler turns DXGI spoofing off for Unity by default, so a Unity game with DLSS saw an AMD GPU, used its
+        # own upscaler and OptiScaler never hooked anything (over the hill on the Legion Go S).
+        self.fake_network()
+        folder = os.path.join(self.common, "UnityDLSS")
+        os.makedirs(os.path.join(folder, "UnityDLSS_Data", "Plugins", "x86_64"))
+        for rel in ("UnityDLSS.exe", "UnityPlayer.dll", os.path.join("UnityDLSS_Data", "Plugins", "x86_64", "nvngx_dlss.dll")):
+            with open(os.path.join(folder, rel), "wb") as f:
+                f.write(b"MZ" + b"\0" * 4096)
+        with open(os.path.join(folder, "UnityDLSS_Data", "globalgamemanagers"), "wb") as f:
+            f.write(b"\0" * 64)
+        self.write_manifest("1005", "Unity DLSS Game", "UnityDLSS")
+        res = self.call("install", {"folder": folder, "options": {"route": "optiscaler"}})
+        self.assertTrue(res.get("success"), res)
+        ini = self.read_ini(folder)
+        self.assertRegex(ini, r"(?m)^Dxgi\s*=\s*true")
+        self.assertRegex(ini, r"(?m)^Dx11Upscaler\s*=\s*fsr31_12")
+        # A game that is not a Unity game keeps OptiScaler's own spoofing choice.
+        plain = os.path.join(self.common, "FakeDLSS")
+        self.assertTrue(self.call("install", {"folder": plain, "options": {"route": "optiscaler"}}).get("success"))
+        self.assertRegex(self.read_ini(plain), r"(?m)^Dxgi\s*=\s*auto")
+
     def test_fsr4_lite_variant(self):
         caps = self.call("capabilities")
         ids = [v["id"] for v in caps["fsr4Variants"]]

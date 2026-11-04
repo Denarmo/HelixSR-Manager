@@ -125,6 +125,31 @@ void main() {
     uninstallHelixSr(again);
   });
 
+  test('DX11 games reach HelixSR through DX11-on-12', () async {
+    final g = makeGame('Dx11', files: ['dxgi.dll']);
+    await installHelixSr(g);
+    final ini = File(p.join(g.target, 'OptiScaler.ini')).readAsStringSync();
+    expect(ini, contains('Dx11Upscaler = fsr31_12'));
+    expect(ini, contains('Dx12Upscaler = fsr31'));
+    // Not a Unity game: OptiScaler's own spoofing choice stays.
+    expect(g.unityHasDlss, isFalse);
+    expect(ini, isNot(contains('Dxgi =')));
+    uninstallHelixSr(scanGame(g.folder, 'Dx11', null));
+  });
+
+  test('Unity games with DLSS get DXGI spoofing', () async {
+    // OptiScaler turns DXGI spoofing off for Unity by default: the game then
+    // sees an AMD GPU, never creates DLSS and OptiScaler hooks nothing.
+    final g = makeGame('UnityDlss', files: ['dxgi.dll', 'UnityPlayer.dll']);
+    expect(g.isUnity, isTrue);
+    expect(g.unityHasDlss, isTrue);
+    await installHelixSr(g);
+    final ini = File(p.join(g.target, 'OptiScaler.ini')).readAsStringSync();
+    expect(ini, contains('[Spoofing]\r\nDxgi = true'));
+    expect(ini, contains('Dx11Upscaler = fsr31_12'));
+    uninstallHelixSr(scanGame(g.folder, 'UnityDlss', null));
+  });
+
   test('direct route swaps the game FSR dll and restores it', () async {
     final g = makeGame('Gamma', files: [dllSr]);
     g.route = 'direct';

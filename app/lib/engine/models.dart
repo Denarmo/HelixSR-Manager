@@ -68,6 +68,11 @@ class GameInfo {
   UnityInfo? unity;
   bool get isUnity => unity != null;
 
+  /// A Unity game that ships NVIDIA's DLSS (nvngx_dlss.dll, usually in
+  /// `<exe>_Data/Plugins/x86_64`).
+  bool get unityHasDlss =>
+      isUnity && (inputs.contains('DLSS') || foundNvngxDlssPath != null);
+
   /// The folder HelixSR files go into.
   String get target => exeFolder ?? folder;
 

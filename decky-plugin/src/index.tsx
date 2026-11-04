@@ -15,13 +15,12 @@ import { callable, definePlugin, toaster } from "@decky/api";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FaBolt } from "react-icons/fa";
 import { addTracked, applyOverrides, LaunchRecord, overridesFrom, restoreTracked } from "./launchOptions";
+import { Choices, currentMethod, Method, pick, picked, Route } from "./method";
 
 // ---------------------------------------------------------------------------
 // Backend (main.py)
 // ---------------------------------------------------------------------------
 
-type Route = "optiscaler" | "direct" | "dlss" | "scaler" | "hlxfsr";
-type Method = Route | "fsr4lite";
 
 interface Game {
   id: string;
@@ -276,7 +275,7 @@ function Content() {
   const [build, setBuild] = useState<BuildState | null>(null);
 
   // Per-install choices, reset whenever another game is picked.
-  const [route, setRoute] = useState<Method>("optiscaler");
+  const [route, setRoute] = useState<Method>(() => (pickedFolder && picked(pickedFolder).method) || "optiscaler");
   const [liteProxy, setLiteProxy] = useState("dxgi.dll");
   const [optiDll, setOptiDll] = useState("dxgi.dll");
   const [fgMode, setFgMode] = useState("auto");
@@ -338,21 +337,46 @@ function Content() {
     };
   }, []);
 
-  // Reset the options to what the selected game has (or sensible defaults).
+  const hasH3 = !!caps?.helixsr3 && !!status?.helixsr3;
+  /** Methods the Method dropdown offers for a game, in order. */
+  const offeredMethods = (g: Game): Method[] => [
+    ...(g.lite?.eligible || g.lite?.installed ? (["fsr4lite"] as Method[]) : []),
+    ...ROUTES.filter((r) => {
+      if (r.id === "dlss") return !!caps?.dlssLoader;
+      if (r.id === "scaler") return hasH3;
+      if (r.id === "hlxfsr") return hasH3 && (!!g.hasFsr31 || g.route === "hlxfsr");
+      return true;
+    }).map((r) => r.id),
+  ];
+
+  // Show what the user picked for this game, or what the game has (or sensible defaults). Steam remounts this
+  // panel when a dropdown closes, so the picks live in ./method (per game folder), not only in React state.
   useEffect(() => {
     if (!game) return;
-    const h3Ready = !!caps?.helixsr3 && !!status?.helixsr3?.scalerReady;
-    const helixRoute: Route =
-      !game.installed && h3Ready ? "scaler" : game.route === "dlss" && !caps?.dlssLoader ? "optiscaler" : game.route;
-    // FSR 4 Lite is the default on AMD handhelds for games it can go in, unless HelixSR is already installed there.
-    const preferLite = !!lite?.device.preferLite && !!game.lite?.eligible && !game.installed;
-    setRoute(game.lite?.installed || preferLite ? "fsr4lite" : helixRoute);
-    setLiteProxy(game.lite?.proxy || "dxgi.dll");
-    setOptiDll(game.optiDllName || "dxgi.dll");
-    setFgMode(game.fgMode || "auto");
-    setFakeNvapi(game.useFakeNvapi !== false);
-    setReframework(!!(game.installReFramework || game.isReEngine));
-  }, [game?.folder, game?.installed, game?.lite?.installed, caps, lite?.device.preferLite]);
+    const p = picked(game.folder);
+    setRoute(
+      currentMethod(
+        game,
+        {
+          scalerReady: !!caps?.helixsr3 && !!status?.helixsr3?.scalerReady,
+          dlssLoader: !!caps?.dlssLoader,
+          preferLite: !!lite?.device.preferLite,
+        },
+        offeredMethods(game),
+      ),
+    );
+    setLiteProxy(p.liteProxy ?? (game.lite?.proxy || "dxgi.dll"));
+    setOptiDll(p.optiDll ?? (game.optiDllName || "dxgi.dll"));
+    setFgMode(p.fgMode ?? (game.fgMode || "auto"));
+    setFakeNvapi(p.fakeNvapi ?? game.useFakeNvapi !== false);
+    setReframework(p.reframework ?? !!(game.installReFramework || game.isReEngine));
+  }, [game?.folder, game?.installed, game?.lite?.installed, game?.lite?.eligible, caps, status?.helixsr3?.scalerReady, lite?.device.preferLite]);
+
+  /** Set a per-game choice and remember it across remounts. */
+  const choose = <K extends keyof Choices>(key: K, value: NonNullable<Choices[K]>, set: (v: NonNullable<Choices[K]>) => void) => {
+    if (game) pick(game.folder, key, value);
+    set(value);
+  };
 
   // Remember the last picked game across Quick Access openings.
   useEffect(() => {
@@ -607,7 +631,7 @@ function Content() {
                 description="If another mod already uses this name, the next free one is taken."
                 rgOptions={["dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll", "wininet.dll", "winhttp.dll"].map((d) => ({ data: d, label: d }))}
                 selectedOption={liteProxy}
-                onChange={(o) => setLiteProxy(o.data)}
+                onChange={(o) => choose("liteProxy", o.data as string, setLiteProxy)}
               />
             </PanelSectionRow>
             <PanelSectionRow>
@@ -664,12 +688,7 @@ function Content() {
   const h3 = caps?.helixsr3 ? status?.helixsr3 : undefined;
   const scalerDlls = caps?.helixsr3?.scalerDlls ?? ["dxgi.dll"];
   const routeReady = route === "scaler" ? !!h3?.scalerReady : route === "hlxfsr" ? !!h3?.dropinReady : ready;
-  const routeOptions = ROUTES.filter((r) => {
-    if (r.id === "dlss") return !!caps?.dlssLoader;
-    if (r.id === "scaler") return !!h3;
-    if (r.id === "hlxfsr") return !!h3 && !!game && (!!game.hasFsr31 || game.route === "hlxfsr");
-    return true;
-  });
+  const methodLabel = (m: Method) => (m === "fsr4lite" ? LITE_METHOD.label : ROUTES.find((r) => r.id === m)?.label ?? m);
   const building = build?.state === "running";
   const lastLine = build?.log?.[build.log.length - 1];
 
@@ -781,12 +800,9 @@ function Content() {
           <PanelSectionRow>
             <DropdownItem
               label="Method"
-              rgOptions={[
-                ...(game.lite?.eligible || game.lite?.installed ? [LITE_METHOD] : []),
-                ...routeOptions,
-              ].map((r) => ({ data: r.id, label: r.label }))}
+              rgOptions={offeredMethods(game).map((m) => ({ data: m, label: methodLabel(m) }))}
               selectedOption={route}
-              onChange={(o) => setRoute(o.data)}
+              onChange={(o) => choose("method", o.data as Method, setRoute)}
             />
           </PanelSectionRow>
           {!game.lite?.eligible && !game.lite?.installed && !!game.lite?.reasons?.length && (
@@ -806,7 +822,7 @@ function Content() {
                 description="dxgi.dll needs no launch option. Press Insert in game for HelixSR Scaler's menu."
                 rgOptions={scalerDlls.map((d) => ({ data: d, label: d }))}
                 selectedOption={scalerDlls.includes(optiDll) ? optiDll : "dxgi.dll"}
-                onChange={(o) => setOptiDll(o.data)}
+                onChange={(o) => choose("optiDll", o.data as string, setOptiDll)}
               />
             </PanelSectionRow>
           )}
@@ -818,7 +834,7 @@ function Content() {
                   label="OptiScaler proxy DLL"
                   rgOptions={(caps?.optiDlls ?? ["dxgi.dll"]).map((d) => ({ data: d, label: d }))}
                   selectedOption={optiDll}
-                  onChange={(o) => setOptiDll(o.data)}
+                  onChange={(o) => choose("optiDll", o.data as string, setOptiDll)}
                 />
               </PanelSectionRow>
               <PanelSectionRow>
@@ -826,7 +842,7 @@ function Content() {
                   label="Frame generation"
                   rgOptions={(caps?.fgModes ?? [{ id: "auto", label: "Game default" }]).map((m) => ({ data: m.id, label: m.label }))}
                   selectedOption={fgMode}
-                  onChange={(o) => setFgMode(o.data)}
+                  onChange={(o) => choose("fgMode", o.data as string, setFgMode)}
                 />
               </PanelSectionRow>
               <PanelSectionRow>
@@ -835,7 +851,7 @@ function Content() {
                   description="Unlocks DLSS options in games that hide them on AMD."
                   checked={fakeNvapi || fgMode.startsWith("dlssg_")}
                   disabled={fgMode.startsWith("dlssg_")}
-                  onChange={setFakeNvapi}
+                  onChange={(v) => choose("fakeNvapi", v, setFakeNvapi)}
                 />
               </PanelSectionRow>
             </>
@@ -843,7 +859,7 @@ function Content() {
 
           {game.isReEngine && (
             <PanelSectionRow>
-              <ToggleField label="REFramework Nightly" checked={reframework} onChange={setReframework} />
+              <ToggleField label="REFramework Nightly" checked={reframework} onChange={(v) => choose("reframework", v, setReframework)} />
             </PanelSectionRow>
           )}
 

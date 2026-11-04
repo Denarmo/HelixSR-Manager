@@ -25,6 +25,36 @@ function parse(options: string): Map<string, string> {
   return map;
 }
 
+/** What to remember when the plugin edits a game's launch options, so it can put them back exactly. */
+export interface LaunchRecord {
+  original: string;
+  applied: string;
+  added: string[];
+}
+
+/** Adds `dlls` (n,b) to `current` and records what it changed. An override the user already had is not "added". */
+export function addTracked(current: string | null | undefined, dlls: string[], prior?: LaunchRecord | null): LaunchRecord {
+  const cur = current || "";
+  const have = parse(cur);
+  const applied = applyOverrides(cur, dlls, []);
+  const added = dlls.map((d) => d.toLowerCase()).filter((d) => have.get(d) !== "n,b");
+  if (prior) {
+    // Re-applying (e.g. proxy unchanged): keep the first original so uninstall still restores it.
+    return { original: prior.original, applied, added: [...new Set([...prior.added, ...added])] };
+  }
+  return { original: cur, applied, added };
+}
+
+/**
+ * Undoes addTracked. If the options are still exactly what the plugin set, the original string comes back
+ * unchanged; if the user edited them since, only the overrides the plugin added are taken out.
+ */
+export function restoreTracked(current: string | null | undefined, rec: LaunchRecord): string {
+  const cur = current || "";
+  if (cur === rec.applied) return rec.original;
+  return rec.added.length ? applyOverrides(cur, [], rec.added) : cur;
+}
+
 /**
  * Returns `existing` with `add` set to native-then-builtin (n,b) and `remove` taken out
  * of WINEDLLOVERRIDES. Other overrides, env vars and arguments are kept.

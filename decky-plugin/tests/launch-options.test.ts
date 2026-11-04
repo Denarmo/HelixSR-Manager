@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyOverrides, overridesFrom } from "../src/launchOptions.ts";
+import { addTracked, applyOverrides, overridesFrom, restoreTracked } from "../src/launchOptions.ts";
 
 test("parses the engine's launch option", () => {
   assert.deepEqual(overridesFrom('WINEDLLOVERRIDES="dxgi,dinput8=n,b" %command%'), ["dxgi", "dinput8"]);
@@ -44,4 +44,33 @@ test("removing the last override cleans up", () => {
 test("idempotent", () => {
   const once = applyOverrides("", ["dxgi", "dinput8"], []);
   assert.equal(applyOverrides(once, ["dxgi", "dinput8"], []), once);
+});
+
+test("FSR 4 Lite: uninstall restores the exact original options", () => {
+  const original = "PROTON_LOG=1   %command% -dx12";
+  const rec = addTracked(original, ["dxgi"]);
+  assert.equal(rec.applied, 'WINEDLLOVERRIDES="dxgi=n,b" PROTON_LOG=1 %command% -dx12');
+  assert.deepEqual(rec.added, ["dxgi"]);
+  assert.equal(restoreTracked(rec.applied, rec), original);
+});
+
+test("FSR 4 Lite: an override the user already had is kept on uninstall", () => {
+  const original = 'WINEDLLOVERRIDES="dxgi=n,b" %command%';
+  const rec = addTracked(original, ["dxgi"]);
+  assert.deepEqual(rec.added, []);
+  // User edited the options afterwards: nothing of theirs is removed.
+  assert.equal(restoreTracked('WINEDLLOVERRIDES="dxgi=n,b" %command% -windowed', rec), 'WINEDLLOVERRIDES="dxgi=n,b" %command% -windowed');
+});
+
+test("FSR 4 Lite: user edits after install survive, only our override goes", () => {
+  const rec = addTracked("", ["winmm"]);
+  const edited = rec.applied + " -nosplash";
+  assert.equal(restoreTracked(edited, rec), "%command% -nosplash");
+});
+
+test("FSR 4 Lite: re-applying keeps the first original", () => {
+  const first = addTracked("-high", ["dxgi"]);
+  const again = addTracked(first.applied, ["dxgi"], first);
+  assert.equal(again.original, "-high");
+  assert.equal(restoreTracked(again.applied, again), "-high");
 });

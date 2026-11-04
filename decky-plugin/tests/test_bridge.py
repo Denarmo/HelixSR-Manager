@@ -27,7 +27,7 @@ class BridgeTest(unittest.TestCase):
         shutil.copy2(os.path.join(PLUGIN, "py_modules", "helixsr_bridge.py"), self.mods)
         shutil.copy2(ENGINE_SRC, os.path.join(self.mods, "helixsr_engine.py"))
         # Plugin-bundled core (only the DLLs the tests need, to keep it fast).
-        core_ver = os.listdir(CORE_SRC)[0]
+        core_ver = next(d for d in sorted(os.listdir(CORE_SRC)) if os.path.isfile(os.path.join(CORE_SRC, d, "amd_fidelityfx_dx12.dll")))
         self.bundle = os.path.join(self.tmp, "plugin", "helixsr_core")
         shutil.copytree(os.path.join(CORE_SRC, core_ver), os.path.join(self.bundle, core_ver),
                         ignore=shutil.ignore_patterns("amd-fsr", "setup"))
@@ -66,10 +66,19 @@ class BridgeTest(unittest.TestCase):
         self.assertIn(mark, out, out)
         return json.loads(out[out.rfind(mark) + len(mark):].strip().splitlines()[0])
 
-    def test_status_uses_bundled_core(self):
+    def fake_network(self):
+        core = self.call("status")["coreDir"]
+        for n in ("helixsr_weights.bin", "helixsr_kernels.pak"):
+            with open(os.path.join(core, n), "wb") as f:
+                f.write(b"x" * 16)
+
+    def test_status_uses_data_copy_of_bundled_core(self):
+        # The bundled core is copied out of the plugin folder (Decky replaces that folder on every update,
+        # which used to throw the built network away).
         st = self.call("status")
         self.assertTrue(st["coreExists"], st)
-        self.assertEqual(st["coreSource"], "bundled")
+        self.assertEqual(st["coreSource"], "data")
+        self.assertTrue(st["coreDir"].startswith(os.path.join(self.home, ".local", "share", "HelixSR", "core")))
         self.assertFalse(st["weightsBuilt"])
         caps = st["capabilities"]
         self.assertIn("dxgi.dll", caps["optiDlls"])
@@ -98,16 +107,45 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(found["appId"], "1002")
         self.assertIsNone(self.call("find_app", {"appId": "999"})["game"])
 
+    def write_manifest(self, appid, name, inst):
+        steamapps = os.path.dirname(self.common)
+        lines = ['"AppState"', "{", f'\t"appid"\t\t"{appid}"', f'\t"name"\t\t"{name}"', f'\t"installdir"\t\t"{inst}"', "}"]
+        os.makedirs(os.path.join(self.common, inst), exist_ok=True)
+        with open(os.path.join(steamapps, f"appmanifest_{appid}.acf"), "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+    def test_native_linux_game_listed_as_unsupported_and_leftovers_hidden(self):
+        elf = bytes([0x7F]) + b"ELF"
+        native = os.path.join(self.common, "NativeGame")
+        os.makedirs(native)
+        exe = os.path.join(native, "NativeGame.x86_64")
+        with open(exe, "wb") as f:
+            # e_ident (16 bytes) then e_type = 2 (executable)
+            f.write(elf + bytes([2, 1, 1]) + bytes(9) + bytes([2, 0]) + bytes(8192))
+        os.chmod(exe, 0o755)
+        with open(os.path.join(native, "UnityPlayer.so"), "wb") as f:
+            f.write(elf + bytes(8192))
+        os.makedirs(os.path.join(self.common, "Leftover", "DS"))
+        self.write_manifest("1003", "Native Game", "NativeGame")
+        self.write_manifest("1004", "Leftover", "Leftover")
+        self.write_manifest("228980", "Steamworks Common Redistributables", "Steamworks Shared")
+        games = {g["name"]: g for g in self.call("list_games", {"refresh": True})["games"]}
+        self.assertIn("Native Game", games)
+        self.assertEqual(games["Native Game"]["native"], "NativeGame.x86_64")
+        self.assertFalse(games["Native Game"]["lite"]["eligible"])
+        self.assertIn("Native Linux", games["Native Game"]["lite"]["reasons"][0])
+        self.assertNotIn("Leftover", games)
+        self.assertNotIn("Steamworks Common Redistributables", games)
+        self.assertIsNone(games["Fake DLSS Game"]["native"])
+        self.assertEqual(self.call("find_app", {"appId": "1003"})["game"]["name"], "Native Game")
+
     def test_install_needs_built_network(self):
         res = self.call("install", {"folder": os.path.join(self.common, "FakeDLSS"), "options": {"route": "optiscaler"}})
         self.assertFalse(res["success"])
         self.assertIn("compiled", res["error"])
 
     def test_install_and_uninstall_with_fake_network(self):
-        core = os.path.join(self.bundle, self.core_ver)
-        for n in ("helixsr_weights.bin", "helixsr_kernels.pak"):
-            with open(os.path.join(core, n), "wb") as f:
-                f.write(b"x" * 16)
+        self.fake_network()
         folder = os.path.join(self.common, "FakeDLSS")
         res = self.call("install", {"folder": folder, "options": {"route": "optiscaler", "optiDll": "winmm.dll"}})
         self.assertTrue(res.get("success"), res)
@@ -116,6 +154,11 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(g["optiDllName"], "winmm.dll")
         self.assertIn("winmm=n,b", g["protonLaunchOptions"])
         self.assertTrue(os.path.isfile(os.path.join(folder, "winmm.dll")))
+        with open(os.path.join(folder, "OptiScaler.ini"), encoding="utf-8", errors="ignore") as f:
+            ini = f.read()
+        # DX11 games (most Unity games) reach HelixSR through DX11-on-12, not OptiScaler's built-in FSR 2.2.
+        self.assertRegex(ini, r"(?m)^Dx11Upscaler\s*=\s*fsr31_12")
+        self.assertRegex(ini, r"(?m)^Dx12Upscaler\s*=\s*fsr31")
         cached = [x for x in self.call("list_games")["games"] if x["folder"] == g["folder"]][0]
         self.assertTrue(cached["installed"])
         res = self.call("uninstall", {"folder": folder})
@@ -128,10 +171,7 @@ class BridgeTest(unittest.TestCase):
         ids = [v["id"] for v in caps["fsr4Variants"]]
         if "lite" not in ids:
             self.skipTest("engine has no FSR 4 variants")
-        core = os.path.join(self.bundle, self.core_ver)
-        for n in ("helixsr_weights.bin", "helixsr_kernels.pak"):
-            with open(os.path.join(core, n), "wb") as f:
-                f.write(b"x" * 16)
+        self.fake_network()
         folder = os.path.join(self.common, "FakeDLSS")
         res = self.call("install", {"folder": folder, "options": {"route": "optiscaler", "fsr4Variant": "lite"}})
         self.assertTrue(res.get("success"), res)

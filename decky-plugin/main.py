@@ -124,6 +124,27 @@ class Plugin:
     async def set_settings(self, settings):
         return await self._call("set_settings", {"settings": settings or {}})
 
+    # ----- FSR 4 Lite (OptiScaler 10 + AMD's driver FSR 4.1.2 INT8 Lite) -----
+
+    async def lite_status(self):
+        return await self._call("lite_status", timeout=60)
+
+    async def lite_prepare(self):
+        # Downloads and checks the pinned ~108 MB runtime.
+        return await self._call("lite_prepare", timeout=1800)
+
+    async def lite_install(self, folder, proxy="dxgi.dll", mode="lite"):
+        return await self._call("lite_install", {"folder": folder, "proxy": proxy, "mode": mode})
+
+    async def lite_uninstall(self, folder):
+        return await self._call("lite_uninstall", {"folder": folder})
+
+    async def lite_mode(self, folder, mode):
+        return await self._call("lite_mode", {"folder": folder, "mode": mode})
+
+    async def lite_verify(self, folder):
+        return await self._call("lite_verify", {"folder": folder})
+
     async def build_status(self):
         return await self._call("build_status")
 

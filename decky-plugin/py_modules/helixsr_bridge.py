@@ -255,7 +255,10 @@ def list_games(refresh=False):
         try:
             with open(cache, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if isinstance(data, dict) and isinstance(data.get("games"), list):
+            games = data.get("games") if isinstance(data, dict) else None
+            # A cache from before the FSR 4 Lite check (no "lite" field) is rescanned once.
+            if isinstance(games, list) and all(isinstance(g, dict) and "lite" in g for g in games):
+                data["games"] = [g for g in games if is_game(g)]
                 return data
         except Exception:
             pass

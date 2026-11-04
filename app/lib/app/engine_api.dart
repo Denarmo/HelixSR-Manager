@@ -56,7 +56,10 @@ class IsolateEngine implements EngineApi {
   });
 
   @override
-  Future<CoreStatus> coreStatus() => Isolate.run(() => Core.instance.status());
+  Future<CoreStatus> coreStatus() => Isolate.run(() {
+    final core = Core.instance..publishLocation();
+    return core.status();
+  });
 
   @override
   Future<List<GpuInfo>> gpus() => getGpuInfo();

@@ -189,6 +189,36 @@ def get_data_dir():
     return os.path.join(xdg, "HelixSR")
 
 
+def network_built(core_dir):
+    """True when core_dir holds a built HelixSR network (appended to the DLL, or the older separate files)."""
+    if read_embedded_network(os.path.join(core_dir, DLL_FSR)) is not None:
+        return True
+    return all(
+        os.path.isfile(os.path.join(core_dir, n)) and os.path.getsize(os.path.join(core_dir, n)) > 0 for n in NETWORK_FILES
+    )
+
+
+def shared_core_dir():
+    """The core in the data folder (~/.local/share/HelixSR/core/HelixSR-x.y.z). The Decky plugin and the Flutter app
+    (when its own folder is read-only) build their network there."""
+    return os.path.join(get_data_dir(), "core", f"HelixSR-{CORE_VERSION}")
+
+
+def prefer_built_core(core_dir):
+    """The data-folder core when its network is built and core_dir's is not, so a network built in the Decky plugin
+    or the Flutter app is used here instead of being built a second time."""
+    shared = shared_core_dir()
+    try:
+        if os.path.isfile(os.path.join(shared, DLL_FSR)) and not network_built(core_dir) and network_built(shared):
+            return shared
+    except Exception:
+        pass
+    return core_dir
+
+
+CORE_DIR = prefer_built_core(CORE_DIR)
+
+
 def load_config():
     if os.path.isfile(CONFIG_FILE):
         try:

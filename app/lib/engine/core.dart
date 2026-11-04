@@ -21,12 +21,14 @@ class Core {
 
   static Core? _instance;
 
-  static Core get instance => _instance ??= Core._(_resolve());
+  static Core get instance => _instance ??= Core._(resolve());
 
   /// Tests and the "use another core" setting point the engine elsewhere.
   static void use(String dir) => _instance = Core._(dir);
 
-  static String _resolve() {
+  /// The core to use: $HELIXSR_CORE, else the one bundled next to the app
+  /// (copied to the data folder when read-only), else the data folder's.
+  static String resolve() {
     final folder = 'HelixSR-$coreVersion';
     final candidates = <String>[
       if (Platform.environment['HELIXSR_CORE'] != null)
@@ -42,11 +44,42 @@ class Core {
       p.join(Directory.current.path, '..', 'helixsr_core', folder),
       p.join(Directory.current.path, '..', '..', 'helixsr_core', folder),
     ];
+    final shared = sharedCoreDir();
     for (final c in candidates) {
       final n = normalizePath(c);
-      if (fileExists(p.join(n, dllFsr))) return _writable(n);
+      if (!fileExists(p.join(n, dllFsr))) continue;
+      final dir = _writable(n);
+      // A network built in the Decky plugin or the Linux edition's data
+      // folder is used instead of building it a second time.
+      if (c != Platform.environment['HELIXSR_CORE'] &&
+          dir != shared &&
+          !networkBuilt(dir) &&
+          fileExists(p.join(shared, dllFsr)) &&
+          networkBuilt(shared)) {
+        return shared;
+      }
+      return dir;
     }
-    return p.join(dataDir(), 'core', folder);
+    return shared;
+  }
+
+  /// The core in the data folder, shared with the Linux edition and the
+  /// Decky plugin (~/.local/share/HelixSR/core/HelixSR-x.y.z).
+  static String sharedCoreDir() =>
+      p.join(dataDir(), 'core', 'HelixSR-$coreVersion');
+
+  /// Linux: records the install folder in the data folder's app_dir.txt
+  /// (as the Linux edition does), so the Decky plugin finds a network built
+  /// into this app's own core. Only when the core sits in a `helixsr_core`
+  /// folder next to the app, the layout the plugin looks for.
+  void publishLocation() {
+    if (isWindows) return;
+    final parent = p.dirname(dir);
+    if (p.basename(parent) != 'helixsr_core') return;
+    try {
+      Directory(dataDir()).createSync(recursive: true);
+      writeText(p.join(dataDir(), 'app_dir.txt'), '${p.dirname(parent)}\n');
+    } catch (_) {}
   }
 
   /// A read-only install folder (Program Files, a squashfs, an AppImage)
@@ -133,6 +166,16 @@ class Core {
       }
     }
   }
+}
+
+/// Whether [coreDir] holds a built network (appended to the DLL, or the older
+/// separate files).
+bool networkBuilt(String coreDir) {
+  if (readEmbeddedNetwork(p.join(coreDir, dllFsr)) != null) return true;
+  for (final n in networkFiles) {
+    if (fileSize(p.join(coreDir, n)) == 0) return false;
+  }
+  return true;
 }
 
 bool _which(String exe) {

@@ -24,6 +24,7 @@ export 'core.dart'
         isDlssLoaderBinary,
         readEmbeddedNetwork;
 export 'extras.dart' show clearShaderCache, inZoiUserSettingsPath;
+export 'helixsr3.dart';
 export 'ini.dart';
 export 'installer.dart';
 export 'models.dart';

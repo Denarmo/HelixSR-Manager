@@ -76,7 +76,7 @@ class _InspectorState extends State<Inspector> {
     final t = context.brutal;
     final busy = m.isBusy(g);
     final core = m.core;
-    final built = core?.weightsBuilt ?? false;
+    final built = core?.routeReady(g.route) ?? false;
     return SingleChildScrollView(
       child: Padding(
         padding: EdgeInsets.only(
@@ -152,7 +152,7 @@ class _InspectorState extends State<Inspector> {
   }
 
   Widget _setup(BrutalTokens t, bool busy, bool built) {
-    final choices = routeChoices(m.core);
+    final choices = routeChoices(m.core, g);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -173,6 +173,20 @@ class _InspectorState extends State<Inspector> {
             onChanged: busy ? null : (v) => m.edit(g, (x) => x.route = v),
           ),
         ),
+        if (g.route == 'scaler')
+          CfgRow(
+            'File name',
+            control: CfgSegment<String>(
+              options: scalerDllNames,
+              value: scalerDllNames.contains(g.optiDllName)
+                  ? g.optiDllName
+                  : scalerDllNames.first,
+              labelOf: (v) => v,
+              onChanged: busy
+                  ? null
+                  : (v) => m.edit(g, (x) => x.optiDllName = v),
+            ),
+          ),
         if (g.route == 'optiscaler') ...[
           CfgRow(
             'Proxy DLL',
@@ -259,7 +273,7 @@ class _InspectorState extends State<Inspector> {
           Padding(
             padding: EdgeInsets.only(bottom: t.s3),
             child: Text(
-              '> network not built yet: open ENGINE and build it first',
+              notReadyText(g.route),
               style: t.small.copyWith(color: t.danger),
             ),
           ),

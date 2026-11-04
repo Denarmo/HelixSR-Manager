@@ -24,10 +24,13 @@ abstract class EngineApi {
   Future<int> sync(List<GameInfo> games);
 
   /// Streams the network compiler output; returns games updated, -1 on error.
+  /// [core]: "legacy" (bundled HelixSR 1.8.1) or "helixsr3" (downloads and
+  /// builds the official HelixSR 3 release).
   Future<int> buildNetwork({
     required String dlssPath,
     required void Function(String) log,
     required List<GameInfo> Function() games,
+    String core = 'legacy',
   });
 }
 
@@ -67,7 +70,13 @@ class IsolateEngine implements EngineApi {
     required String dlssPath,
     required void Function(String) log,
     required List<GameInfo> Function() games,
-  }) => buildNetworkProcess(dlssPath: dlssPath, log: log, games: games);
+    String core = 'legacy',
+  }) => buildNetworkProcess(
+    dlssPath: dlssPath,
+    log: log,
+    games: games,
+    core: core,
+  );
 }
 
 GameInfo _rescan(GameInfo g) =>
@@ -79,4 +88,10 @@ Future<int> buildNetworkProcess({
   required String dlssPath,
   required void Function(String) log,
   required List<GameInfo> Function() games,
-}) => buildNetwork(dlssPath: dlssPath, log: log, installedGames: games);
+  String core = 'legacy',
+}) => buildNetwork(
+  dlssPath: dlssPath,
+  log: log,
+  installedGames: games,
+  core: core,
+);

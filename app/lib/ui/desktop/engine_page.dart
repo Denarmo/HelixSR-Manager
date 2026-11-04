@@ -89,13 +89,15 @@ class _EnginePageState extends State<EnginePage> {
                                 ]),
                         ),
                         SizedBox(height: t.s4),
+                        _helixSr3Panel(t, c?.helixSr3),
+                        SizedBox(height: t.s4),
                         BrutalPanel(
                           header: 'Build.cfg',
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               Text(
-                                '> compiles NVIDIA DLSS Model E locally into the core DLL. Uses a local nvngx_dlss.dll or downloads one.',
+                                '> compiles NVIDIA DLSS Model E locally into the core DLL. Uses a local nvngx_dlss.dll or downloads one. The DLSS DLL picked here is used by the HelixSR $helixSr3Version build too.',
                                 style: t.small,
                               ),
                               SizedBox(height: t.s3),
@@ -129,7 +131,7 @@ class _EnginePageState extends State<EnginePage> {
                                   BrutalButton(
                                     label: m.building
                                         ? 'Building'
-                                        : 'Build network',
+                                        : 'Build 1.8.1 network',
                                     icon: PixelGlyph.bolt,
                                     variant: ButtonVariant.primary,
                                     onPressed: m.building
@@ -218,6 +220,69 @@ class _EnginePageState extends State<EnginePage> {
           ),
         );
       },
+    );
+  }
+
+  Widget _helixSr3Panel(BrutalTokens t, HelixSr3Status? h) {
+    final state = h == null
+        ? ''
+        : h.scalerReady
+        ? '[BUILT]'
+        : (h.downloaded ? '[NOT BUILT]' : '[NOT DOWNLOADED]');
+    return BrutalPanel(
+      header: 'HelixSR $helixSr3Version',
+      headerTrailing: Text(
+        state,
+        style: t.label.copyWith(color: t.onHeaderBar),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '> upstream lonewolf0622/HelixSR $helixSr3Version: HLX DLSS through HelixSR Scaler '
+            '(DX12, DX11 and Vulkan games) and HLX FSR 4 (AMD\'s FSR 4 network for GPUs without it). '
+            'The official release is downloaded (${formatBytes(helixSr3Size)}, checked by SHA-256) '
+            'and built on this PC by its own setup, which fetches NVIDIA\'s DLSS DLL from NVIDIA\'s '
+            'GitHub (NVIDIA\'s license) and AMD\'s FSR 4 driver file.',
+            style: t.small,
+          ),
+          if (h != null) ...[
+            SizedBox(height: t.s3),
+            KeyValueStrip([
+              ('Release', h.releaseDir),
+              ('HLX DLSS', h.networkReady ? 'built' : 'not built'),
+              ('HLX FSR 4', h.hlxReady ? 'built' : 'not built'),
+              ('Scaler', h.scalerPresent ? 'present' : 'missing'),
+            ]),
+          ],
+          SizedBox(height: t.s3),
+          Wrap(
+            spacing: t.s3,
+            runSpacing: t.s3,
+            children: [
+              BrutalButton(
+                label: m.building
+                    ? 'Building'
+                    : (h?.downloaded ?? false)
+                    ? ((h?.scalerReady ?? false) ? 'Rebuild' : 'Build')
+                    : 'Download + build',
+                icon: PixelGlyph.bolt,
+                variant: ButtonVariant.primary,
+                onPressed: m.building
+                    ? null
+                    : () => m.build(dlssPath: dlssPath, release: 'helixsr3'),
+              ),
+              BrutalButton(
+                label: 'Open release',
+                icon: PixelGlyph.folder,
+                onPressed: (h?.downloaded ?? false)
+                    ? () => openFolder(h!.releaseDir)
+                    : null,
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

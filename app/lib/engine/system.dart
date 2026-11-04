@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'core.dart';
+import 'helixsr3.dart';
 import 'installer.dart';
 import 'models.dart';
 import 'paths.dart';
@@ -137,6 +138,76 @@ Future<bool> launchGame(GameInfo game) async {
 /// and streams its output. After a successful build, installed games are
 /// refreshed. Completes with the number of updated games (or -1 on failure).
 Future<int> buildNetwork({
+  String dlssPath = '',
+  required void Function(String line) log,
+  required List<GameInfo> Function() installedGames,
+  String core = 'legacy',
+}) async {
+  if (core == 'helixsr3') {
+    return buildHelixSr3(
+      dlssPath: dlssPath,
+      log: log,
+      installedGames: installedGames,
+    );
+  }
+  return _buildLegacy(
+    dlssPath: dlssPath,
+    log: log,
+    installedGames: installedGames,
+  );
+}
+
+/// Downloads the official HelixSR 3 release if needed, runs its setup and
+/// updates the games that have HelixSR 3. Games updated, or -1 on failure.
+Future<int> buildHelixSr3({
+  String dlssPath = '',
+  required void Function(String line) log,
+  required List<GameInfo> Function() installedGames,
+}) async {
+  try {
+    log(
+      "HelixSR $helixSr3Version: the setup downloads NVIDIA's DLSS 310.7.0 DLL from NVIDIA's GitHub "
+      "(NVIDIA's license) and AMD's FSR 4 driver file (from an installed AMD driver, else AMD's driver "
+      'package, about 420 MB) and builds HLX DLSS and HLX FSR 4 on this PC. This takes several minutes.',
+    );
+    await helixSr3Download(log: log);
+    final ok = await helixSr3Build(
+      log: log,
+      rebuild: helixSr3Status().networkReady,
+      dlssPath: dlssPath,
+    );
+    if (!ok) {
+      log(
+        "HelixSR $helixSr3Version's network was not built (see the lines above).",
+      );
+      return -1;
+    }
+    final st = helixSr3Status();
+    log(
+      'HelixSR $helixSr3Version is built'
+      '${st.hlxReady ? '' : ' (HLX FSR 4 is not; run the build again to retry)'}',
+    );
+    var n = 0;
+    for (final g in installedGames()) {
+      final r = g.installedRoute;
+      if (!g.installed || r == null || !helixSr3Routes.contains(r)) continue;
+      try {
+        g.route = r;
+        helixSr3Install(g);
+        n++;
+      } catch (e) {
+        log('${g.name}: $e');
+      }
+    }
+    if (n > 0) log('Updated HelixSR $helixSr3Version in $n installed game(s).');
+    return n;
+  } catch (e) {
+    log('Error during the HelixSR $helixSr3Version build: $e');
+    return -1;
+  }
+}
+
+Future<int> _buildLegacy({
   String dlssPath = '',
   required void Function(String line) log,
   required List<GameInfo> Function() installedGames,

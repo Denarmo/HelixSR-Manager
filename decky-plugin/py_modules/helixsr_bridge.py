@@ -187,7 +187,16 @@ def capabilities():
         params = {}
     variants = getattr(eng, "FSR4_VARIANTS", None)
     fsr4 = bool(variants) and "fsr4_variant" in params
+    h3 = None
+    if hasattr(eng, "helixsr3_status"):
+        h3 = {
+            "version": eng.HELIXSR3_VERSION,
+            "routes": list(eng.HELIXSR3_ROUTES),
+            "scalerDlls": list(eng.SCALER_DLL_NAMES),
+            "downloadSize": eng.HELIXSR3_SIZE,
+        }
     return {
+        "helixsr3": h3,
         "fsr4Variants": list(variants) if fsr4 else [],
         "dlssLoader": bool(getattr(eng, "dlss_loader_available", lambda: False)()),
         "optiDlls": list(getattr(eng, "OPTI_NAMES", ["dxgi.dll"])),
@@ -209,12 +218,13 @@ GAME_KEYS = (
     "id", "name", "folder", "exeFolder", "exeName", "appId", "launcher", "route", "routeDisplay",
     "optiDllName", "useFakeNvapi", "fgMode", "hasDlssG", "isReEngine", "isInZoi", "isUnity",
     "installReFramework", "installed", "version", "inputs", "hasBackups", "hasLogs", "hasMyFsr",
-    "protonLaunchOptions", "fsr4Variant",
+    "protonLaunchOptions", "fsr4Variant", "helixsr3", "scalerVersion",
 )
 
 
 def _slim(game):
     out = {k: game.get(k) for k in GAME_KEYS if k in game}
+    out["hasFsr31"] = bool(game.get("fsrTargets"))
     if out.get("appId") is not None:
         out["appId"] = str(out["appId"])
     exe = (game.get("exeName") or "").lower()
@@ -353,7 +363,7 @@ def install(folder, options=None):
     o = options or {}
     kwargs = {}
     route = o.get("route")
-    if route in ("direct", "optiscaler", "dlss"):
+    if route in ("direct", "optiscaler", "dlss") + tuple(getattr(eng, "HELIXSR3_ROUTES", ())):
         kwargs["route_override"] = route
     if o.get("optiDll"):
         kwargs["opti_dll"] = o["optiDll"]
@@ -454,8 +464,9 @@ def build_status():
     return st
 
 
-def build_run(dlss_path=""):
-    """Run the network compiler in the foreground (the backend starts this as its own process)."""
+def build_run(dlss_path="", core="legacy"):
+    """Run the network compiler in the foreground (the backend starts this as its own process).
+    core="helixsr3" downloads the official HelixSR 3 release first if needed and builds it."""
     eng = engine()
     log_path, state_path = _build_files()
 
@@ -464,7 +475,7 @@ def build_run(dlss_path=""):
             json.dump(dict(kw, pid=os.getpid(), updatedAt=int(time.time())), f)
         os.replace(state_path + ".tmp", state_path)
 
-    write_state(state="running")
+    write_state(state="running", core=core)
     with open(log_path, "w", encoding="utf-8") as log:
         def listener_line(line):
             log.write(line + "\n")
@@ -476,14 +487,21 @@ def build_run(dlss_path=""):
 
         eng.BUILD_LISTENERS.append(_Sink())
         before = set(threading.enumerate())
-        res = eng.start_network_build(dlss_path=dlss_path)
+        if core == "helixsr3":
+            res = eng.start_network_build(dlss_path=dlss_path, core="helixsr3",
+                                          rebuild=eng.helixsr3_status()["networkReady"])
+        else:
+            res = eng.start_network_build(dlss_path=dlss_path)
         if not res.get("success"):
             write_state(state="failed", error=res.get("error", "Could not start the build"))
             return res
         for t in set(threading.enumerate()) - before:
             t.join()
-    ok = eng.get_core_status()["weightsBuilt"]
-    write_state(state="done" if ok else "failed", error=None if ok else "The build did not produce the network. See the log.")
+    if core == "helixsr3":
+        ok = eng.helixsr3_status()["scalerReady"]
+    else:
+        ok = eng.get_core_status()["weightsBuilt"]
+    write_state(core=core, state="done" if ok else "failed", error=None if ok else "The build did not produce the network. See the log.")
     return {"success": ok}
 
 
@@ -553,7 +571,7 @@ COMMANDS = {
     "clear_cache": lambda a: clear_cache(a["folder"]),
     "logs": lambda a: logs(a["folder"]),
     "build_status": lambda a: build_status(),
-    "build_run": lambda a: build_run(a.get("dlssPath") or ""),
+    "build_run": lambda a: build_run(a.get("dlssPath") or "", a.get("core") or "legacy"),
     "get_settings": lambda a: load_settings(),
     "set_settings": lambda a: (save_settings(dict(load_settings(), **(a.get("settings") or {}))), load_settings())[1],
 }

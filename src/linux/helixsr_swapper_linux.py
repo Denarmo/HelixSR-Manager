@@ -153,6 +153,9 @@ def file_contains_ascii(path, pattern, limit):
 
 
 HELIXSR_VERSION_RE = re.compile(rb"HelixSR \d+\.\d+\.\d+")
+# folders the game scan never walks into: HelixSR's own (1.8.1: HelixSR/; 3.x: HelixSR Scaler's backup of the
+# game's files and HelixSR 2.x's HelixSR-fsrfg/)
+SCAN_SKIP_DIRS = ("helixsr", "helixsr-scaler-backup", "helixsr-fsrfg")
 
 
 def is_helixsr_binary(path):
@@ -685,6 +688,11 @@ def compute_proton_launch_option(route, opti_dll, install_reframework):
         opti = opti_dll or "dxgi.dll"
         if opti.lower().endswith(".dll"):
             dlls.append(opti[:-4])
+    elif route == "scaler":
+        # upstream: Proton already loads the game's own dxgi.dll; the other names need the override
+        opti = (opti_dll or "dxgi.dll").lower()
+        if opti != "dxgi.dll" and opti.endswith(".dll"):
+            dlls.append(opti[:-4])
     elif route == "dlss":
         dlls.append(LOADER_DLL[:-4])
     if install_reframework:
@@ -727,14 +735,17 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
 
         files = []
         subdirs = []
+        scaler_here = SCALER_RECORD in entries
         for e in entries:
             full = os.path.join(curr_dir, e)
+            low_e = e.lower()
             if os.path.isfile(full):
                 files.append(e)
-            elif os.path.isdir(full) and e.lower() != HELIXSR_FOLDER.lower():
+            elif os.path.isdir(full) and low_e not in SCAN_SKIP_DIRS and not (scaler_here and low_e == "optiscaler"):
+                # (HelixSR Scaler's own OptiScaler folder carries HLX FSR 4 and AMD's FSR DLLs: not the game's)
                 subdirs.append(full)
 
-        has_opti_marker = any(f.lower() == "optiscaler.ini" for f in files) or os.path.isfile(
+        has_opti_marker = any(f.lower() in ("optiscaler.ini", SCALER_RECORD.lower()) for f in files) or os.path.isfile(
             os.path.join(curr_dir, HELIXSR_FOLDER, MARKER_FILE)
         )
         if has_opti_marker:
@@ -855,6 +866,29 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
             if os.path.isfile(os.path.join(os.path.dirname(target), "helixsr.log")):
                 has_logs = True
 
+    hlx_dropin = False
+    for target in fsr_targets:
+        t_marker = os.path.join(os.path.dirname(target), MARKER_FILE)
+        try:
+            with open(t_marker, "r", encoding="utf-8") as f:
+                if is_helixsr3_marker(json.load(f)):
+                    hlx_dropin = True
+        except Exception:
+            pass
+
+    scaler_rec = read_scaler_record(exe_folder)
+    scaler_version = None
+    if scaler_rec:
+        opti_dll_name = scaler_rec[0]
+        scaler_version = scaler_rec[1]
+        version = None
+        for rel in (HELIXSR3_DLL, os.path.join("HelixSR-fsrfg", DLL_FSR)):
+            version = binary_version(os.path.join(exe_folder, rel))
+            if version:
+                break
+        if os.path.isdir(os.path.join(exe_folder, SCALER_BACKUP_DIR)):
+            has_backups = True
+
     exe_marker = os.path.join(exe_folder, MARKER_FILE)
     if not direct_installed and os.path.isfile(exe_marker):
         direct_installed = True
@@ -865,7 +899,13 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
         except Exception:
             version = CORE_VERSION
 
-    if dlss_installed:
+    if scaler_rec:
+        route = "scaler"
+        installed = True
+    elif hlx_dropin:
+        route = "hlxfsr"
+        installed = True
+    elif dlss_installed:
         route = "dlss"
         installed = True
     elif opti_installed:
@@ -892,6 +932,10 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
 
     if route == "optiscaler":
         route_display = f"OptiScaler ({opti_dll_name}{fg_tag})"
+    elif route == "scaler":
+        route_display = f"HelixSR Scaler ({opti_dll_name})"
+    elif route == "hlxfsr":
+        route_display = "HLX FSR 4 drop-in (FSR 3.1)"
     elif route == "direct":
         route_display = "Direct (FSR 3.1)"
     elif route == "dlss":
@@ -929,6 +973,8 @@ def scan_game(game_folder, fallback_name=None, manifests=None):
         "hasBackups": has_backups,
         "hasLogs": has_logs,
         "hasMyFsr": has_myfsr,
+        "helixsr3": route in HELIXSR3_ROUTES and installed,
+        "scalerVersion": scaler_version,
         "foundNvngxDlssPath": found_dlss_path,
         "cover": find_steam_artwork(appid, "cover"),
         "hero": find_steam_artwork(appid, "hero"),
@@ -1014,7 +1060,388 @@ def get_core_status():
         "dlssLoaderAvailable": dlss_loader_available(),
         "hasPython": has_py,
         "hasDxc": has_dxc,
+        "helixsr3": helixsr3_status(),
     }
+
+
+# ---------------------------------------------------------------------------
+# HelixSR 3 (upstream lonewolf0622/HelixSR 3.x: HLX DLSS, HLX FSR 4, HelixSR Scaler)
+#
+# HelixSR 1.9 and later may only be redistributed unmodified and complete, as an official release
+# (HelixSR Freeware License, section 2), so it is not bundled: the Manager downloads the official
+# release from upstream's GitHub (checked by SHA-256), runs upstream's own setup to build the network
+# and HLX FSR 4's shaders on this PC, and installs into games through upstream's app bridge
+# (setup/helixsr_bridge.py, the JSON interface HelixSR Desktop uses). The Manager, upstream's setup
+# scripts and HelixSR Desktop therefore install the same files and can update or remove each other's
+# installs. Two ways into a game:
+#   scaler  HelixSR Scaler (upstream's OptiScaler build) next to the game's .exe: HLX DLSS through the
+#           game's DLSS, XeSS or FSR option (DX12, and DX11 / Vulkan through HelixSR Scaler), with
+#           HLX FSR 4, AMD FSR and XeSS in its menu (Insert)
+#   hlxfsr  the FSR drop-in: HLX FSR 4 in place of the game's FSR 3.1 DLL (*.original.dll kept)
+# ---------------------------------------------------------------------------
+
+HELIXSR3_VERSION = "3.2.0"
+HELIXSR3_URL = (
+    f"https://github.com/lonewolf0622/HelixSR/releases/download/v{HELIXSR3_VERSION}/HelixSR-{HELIXSR3_VERSION}.zip"
+)
+HELIXSR3_SHA256 = "a4e83da8b4335a886197aef10e8f8a8947a2e32e5e1eebfdf060ff00724c17c7"
+HELIXSR3_SIZE = 217396302
+HELIXSR3_ROUTES = ("scaler", "hlxfsr")
+HELIXSR3_WAYS = {"scaler": "scaler", "hlxfsr": "fsr"}
+HELIXSR3_DLL = os.path.join("HelixSR", "helixsr.dll")
+HELIXSR3_HLX_DLL = os.path.join("HLX-FSR4", DLL_SR)
+HELIXSR3_BRIDGE = os.path.join("setup", "helixsr_bridge.py")
+HELIXSR3_SCALER_DIR = "helixsr-scaler"
+SCALER_RECORD = "HelixSR-Scaler.files"
+SCALER_BACKUP_DIR = "HelixSR-Scaler-backup"
+SCALER_DLL_NAMES = ["dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll", "d3d12.dll", "wininet.dll", "winhttp.dll"]
+HLX_TAIL_MAGIC = b"HLXFSR4D"  # HLX FSR 4's DLL once its shaders are appended (bytes -24..-16)
+# upstream's setup prints this when its build is done and its own game installer starts
+HELIXSR3_BUILD_STOP = "looking for your games"
+HELIXSR_VERSION_CAPTURE_RE = re.compile(rb"HelixSR (\d+\.\d+\.\d+)")
+
+
+def _tail_bytes(path, offset, length):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            if size < offset:
+                return b""
+            f.seek(size - offset)
+            return f.read(length)
+    except OSError:
+        return b""
+
+
+def is_helixsr3_release(d):
+    return bool(d) and os.path.isfile(os.path.join(d, HELIXSR3_BRIDGE)) and os.path.isfile(os.path.join(d, HELIXSR3_DLL))
+
+
+def helixsr3_default_dir():
+    return os.path.join(get_data_dir(), "core", f"HelixSR-{HELIXSR3_VERSION}")
+
+
+def helixsr3_release_dir():
+    """The HelixSR 3 release in use: $HELIXSR3_RELEASE, config "helixsr3Release" (for example a release you
+    extracted yourself for upstream's setup scripts), else the Manager's download in the data folder."""
+    cands = [os.environ.get("HELIXSR3_RELEASE"), load_config().get("helixsr3Release"), helixsr3_default_dir()]
+    for c in cands:
+        if c and is_helixsr3_release(normalize_path(os.path.expanduser(c))):
+            return normalize_path(os.path.expanduser(c))
+    return helixsr3_default_dir()
+
+
+def binary_version(path, limit=4 << 20):
+    try:
+        with open(path, "rb") as f:
+            m = HELIXSR_VERSION_CAPTURE_RE.search(f.read(limit))
+        return m.group(1).decode() if m else None
+    except OSError:
+        return None
+
+
+def helixsr3_status():
+    d = helixsr3_release_dir()
+    present = is_helixsr3_release(d)
+    dll = os.path.join(d, HELIXSR3_DLL)
+    hlx = os.path.join(d, HELIXSR3_HLX_DLL)
+    network = present and _tail_bytes(dll, 32, 8) == EMBED_MAGIC
+    hlx_ready = present and _tail_bytes(hlx, 24, 8) == HLX_TAIL_MAGIC
+    scaler = present and os.path.isfile(os.path.join(d, HELIXSR3_SCALER_DIR, "OptiScaler.dll"))
+    return {
+        "version": (binary_version(dll) if present else None) or HELIXSR3_VERSION,
+        "releaseDir": d,
+        "downloaded": present,
+        "networkReady": bool(network),
+        "hlxReady": bool(hlx_ready),
+        "scalerPresent": bool(scaler),
+        # what each way needs: HelixSR Scaler runs HLX DLSS (the network), the drop-in runs HLX FSR 4
+        "scalerReady": bool(network and scaler),
+        "dropinReady": bool(hlx_ready),
+        "url": HELIXSR3_URL,
+        "downloadSize": HELIXSR3_SIZE,
+    }
+
+
+def _safe_extract(zf, dest):
+    root = os.path.realpath(dest)
+    for info in zf.infolist():
+        target = os.path.realpath(os.path.join(dest, info.filename))
+        if target != root and not target.startswith(root + os.sep):
+            raise RuntimeError(f"unsafe path in the HelixSR zip: {info.filename}")
+    for info in zf.infolist():
+        zf.extract(info, dest)
+        mode = (info.external_attr >> 16) & 0o777
+        path = os.path.join(dest, info.filename)
+        if mode and not info.is_dir() and os.name != "nt":
+            try:
+                os.chmod(path, mode)
+            except OSError:
+                pass
+
+
+def _mark_executables(d):
+    if os.name == "nt":
+        return
+    for rel in ("helixsr-setup.sh", "helixsr-uninstall.sh", os.path.join(HELIXSR3_SCALER_DIR, "setup_linux.sh"),
+                os.path.join("setup", "lib", "model", "launch_synth"),
+                os.path.join("setup", "hlxfsr4", "tools", "dxc_assemble")):
+        p = os.path.join(d, rel)
+        if os.path.isfile(p):
+            try:
+                os.chmod(p, 0o755)
+            except OSError:
+                pass
+
+
+def helixsr3_download(log=print, url=None, sha256=None):
+    """Downloads and extracts the official HelixSR 3 release into the data folder (once)."""
+    import hashlib
+
+    dest = helixsr3_default_dir()
+    if is_helixsr3_release(dest):
+        return dest
+    url = url or HELIXSR3_URL
+    sha256 = (sha256 or HELIXSR3_SHA256).lower()
+    base = os.path.dirname(dest)
+    os.makedirs(base, exist_ok=True)
+    zpath = os.path.join(base, f"HelixSR-{HELIXSR3_VERSION}.zip.partial")
+    log(f"Downloading HelixSR {HELIXSR3_VERSION} from {url} ({HELIXSR3_SIZE // (1 << 20)} MB)")
+    h = hashlib.sha256()
+    req = urllib.request.Request(url, headers={"User-Agent": f"HelixSR-Manager/{APP_VERSION}"})
+    with urllib.request.urlopen(req, timeout=60) as r, open(zpath, "wb") as f:
+        total = int(r.headers.get("Content-Length") or 0)
+        done = 0
+        next_note = 0
+        while True:
+            chunk = r.read(1 << 20)
+            if not chunk:
+                break
+            f.write(chunk)
+            h.update(chunk)
+            done += len(chunk)
+            if total and done * 100 // total >= next_note:
+                log(f"  {done * 100 // total}% ({done >> 20} MB)")
+                next_note += 10
+    if h.hexdigest() != sha256:
+        os.remove(zpath)
+        raise RuntimeError(f"HelixSR-{HELIXSR3_VERSION}.zip: checksum mismatch (got {h.hexdigest()})")
+    log("Checksum OK, extracting")
+    tmp = os.path.join(base, f".HelixSR-{HELIXSR3_VERSION}.partial")
+    shutil.rmtree(tmp, ignore_errors=True)
+    os.makedirs(tmp)
+    with zipfile.ZipFile(zpath) as zf:
+        _safe_extract(zf, tmp)
+    inner = os.path.join(tmp, f"HelixSR-{HELIXSR3_VERSION}")
+    src = inner if os.path.isdir(inner) else tmp
+    if not is_helixsr3_release(src):
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise RuntimeError("the downloaded zip is not a HelixSR 3 release")
+    _mark_executables(src)
+    shutil.rmtree(dest, ignore_errors=True)
+    os.replace(src, dest)
+    shutil.rmtree(tmp, ignore_errors=True)
+    try:
+        os.remove(zpath)
+    except OSError:
+        pass
+    log(f"HelixSR {HELIXSR3_VERSION} is in {dest}")
+    return dest
+
+
+def helixsr3_build_command(release, rebuild=False, dlss_path=""):
+    if os.name == "nt":
+        cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+               os.path.join(release, "helixsr-setup.ps1"), "-Yes"]
+        if rebuild:
+            cmd.append("-Rebuild")
+        if dlss_path and os.path.isfile(dlss_path):
+            cmd += ["-Dlss", dlss_path]
+        return cmd
+    cmd = ["bash", os.path.join(release, "helixsr-setup.sh"), "--yes"]
+    if rebuild:
+        cmd.append("--rebuild")
+    if dlss_path and os.path.isfile(dlss_path):
+        cmd += ["--dlss", dlss_path]
+    return cmd
+
+
+def _stop_process_tree(proc):
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+        else:
+            import signal
+
+            os.killpg(proc.pid, signal.SIGTERM)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def helixsr3_build(log=print, rebuild=False, dlss_path="", env=None):
+    """Runs upstream's setup (helixsr-setup.sh / .ps1 --yes): it downloads Python + numpy and Microsoft's shader
+    compiler if needed, NVIDIA's DLSS 310.7.0 DLL from NVIDIA's GitHub and AMD's FSR 4 driver file, and builds the
+    network into HelixSR/helixsr.dll and HLX FSR 4's shaders. The setup's own game installer that follows is stopped
+    before it lists any game (the Manager installs games itself). True when the network is built."""
+    release = helixsr3_release_dir()
+    if not is_helixsr3_release(release):
+        raise RuntimeError(f"HelixSR {HELIXSR3_VERSION} is not downloaded yet")
+    _mark_executables(release)
+    cmd = helixsr3_build_command(release, rebuild, dlss_path)
+    log("Running HelixSR's setup: " + " ".join(cmd))
+    run_env = dict(env or os.environ)
+    run_env["PYTHONUNBUFFERED"] = "1"
+    kw = {"start_new_session": True} if os.name != "nt" else {}
+    proc = subprocess.Popen(cmd, cwd=release, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, bufsize=1, env=run_env, **kw)
+    stopped = False
+    for line in proc.stdout:
+        if HELIXSR3_BUILD_STOP in line.lower():
+            _stop_process_tree(proc)
+            stopped = True
+            log("(HelixSR Manager installs games itself - the setup's game list is skipped)")
+            break
+        log(line.rstrip())
+    proc.stdout.close()
+    try:
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        _stop_process_tree(proc)
+    st = helixsr3_status()
+    if not stopped and not st["networkReady"]:
+        log(f"HelixSR's setup exited with code {proc.returncode}")
+    return st["networkReady"]
+
+
+def helixsr3_python():
+    """Python for upstream's bridge (standard library only): upstream's portable Python, the system's, or this one."""
+    d = get_data_dir()
+    for p in ((os.path.join(d, "python", "python.exe"),) if os.name == "nt" else
+              (os.path.join(d, "python", "bin", "python3"), "/usr/bin/python3", shutil.which("python3") or "")):
+        if p and os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return sys.executable
+
+
+def helixsr3_bridge(command, release=None, **options):
+    """One call of upstream's app bridge; returns its JSON answer, raises RuntimeError with its error."""
+    release = release or helixsr3_release_dir()
+    if not is_helixsr3_release(release):
+        raise RuntimeError(f"HelixSR {HELIXSR3_VERSION} is not downloaded yet")
+    cmd = [helixsr3_python(), "-I", os.path.join(release, HELIXSR3_BRIDGE), release, command]
+    for k, v in options.items():
+        if v is None:
+            continue
+        values = v if isinstance(v, (list, tuple)) else [v]
+        for one in values:
+            cmd += ["--" + k.replace("_", "-"), str(one)]
+    env = dict(os.environ)
+    for k in ("PYTHONHOME", "PYTHONPATH", "LD_PRELOAD"):
+        env.pop(k, None)
+    p = subprocess.run(cmd, cwd=release, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=900,
+                       env=env)
+    out = None
+    for line in reversed((p.stdout or "").strip().splitlines()):
+        try:
+            out = json.loads(line)
+            break
+        except ValueError:
+            continue
+    if not isinstance(out, dict):
+        raise RuntimeError(((p.stderr or p.stdout or "").strip()[-400:]) or f"HelixSR bridge {command} gave no answer")
+    if not out.get("ok"):
+        raise RuntimeError(out.get("error") or f"HelixSR bridge {command} failed")
+    return out
+
+
+def read_scaler_record(exe_dir):
+    """(dll name, HelixSR Scaler version, files) from HelixSR-Scaler.files; None when HelixSR Scaler is not there."""
+    p = os.path.join(exe_dir or "", SCALER_RECORD)
+    if not exe_dir or not os.path.isfile(p):
+        return None
+    name, version, files = "dxgi.dll", None, []
+    try:
+        with open(p, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("# version="):
+                    version = line.split("=", 1)[1].strip() or None
+                elif line.startswith("name="):
+                    name = line.split("=", 1)[1].strip()
+                elif line and not line.startswith("#"):
+                    files.append(line)
+    except OSError:
+        return None
+    return name, version, files
+
+
+def is_helixsr3_marker(mdata):
+    """An install record of upstream's FSR drop-in from HelixSR 2 on (HLX FSR 4)."""
+    if not isinstance(mdata, dict):
+        return False
+    if mdata.get("upscaler") == "HLX FSR 4":
+        return True
+    m = re.match(r"(\d+)\.", str(mdata.get("helixsr") or ""))
+    return bool(m) and int(m.group(1)) >= 2
+
+
+def helixsr3_install(game, route, scaler_name=None):
+    """Installs (or updates, or switches to) a HelixSR 3 way through upstream's bridge."""
+    st = helixsr3_status()
+    if route == "scaler" and not st["scalerReady"]:
+        raise RuntimeError(f"HelixSR {HELIXSR3_VERSION}'s network is not built yet: build it under Engine first.")
+    if route == "hlxfsr" and not st["dropinReady"]:
+        raise RuntimeError(f"HLX FSR 4 is not built yet: build HelixSR {HELIXSR3_VERSION} under Engine first.")
+    # A HelixSR 1.8.1 install made by this Manager comes out first, with the Manager's own records
+    # (its OptiScaler, FakeNVAPI and backups), before upstream's installer takes the game.
+    if game.get("installed") and game.get("route") not in HELIXSR3_ROUTES:
+        cleanup_helixsr_files(game)
+    release = st["releaseDir"]
+    opts = {"game": game["folder"], "way": HELIXSR3_WAYS[route]}
+    if route == "scaler":
+        opts["scaler"] = os.path.join(release, HELIXSR3_SCALER_DIR)
+        if scaler_name and scaler_name.lower() in SCALER_DLL_NAMES:
+            opts["scaler_name"] = scaler_name.lower()
+    return helixsr3_bridge("install", release, **opts)
+
+
+def helixsr3_remove(game):
+    return helixsr3_bridge("remove", game=game["folder"])
+
+
+def helixsr3_settings(game, values=None):
+    """The game's HelixSR settings (helixsr.ini, or OptiScaler.ini [HelixSR] for HelixSR Scaler); with values
+    ({"Section.Key": value}), changes them first."""
+    if values:
+        helixsr3_bridge("settings-set", game=game["folder"], values=json.dumps(values))
+    return helixsr3_bridge("settings-get", game=game["folder"])
+
+
+def helixsr3_rollback(game):
+    """Back to the HelixSR version the game had before its last update (upstream keeps HelixSR-previous.zip)."""
+    return helixsr3_bridge("rollback", game=game["folder"])
+
+
+def helixsr3_log(game):
+    return helixsr3_bridge("log", game=game["folder"])
+
+
+def helixsr3_update_installed_games(log=print):
+    """After a (re)build: update every game that has a HelixSR 3 way to the release's files."""
+    n = 0
+    for g in scan_all_games():
+        if not g.get("installed") or g.get("route") not in HELIXSR3_ROUTES:
+            continue
+        try:
+            helixsr3_install(g, g["route"])
+            n += 1
+        except Exception as e:
+            log(f"{g['name']}: {e}")
+    return n
 
 
 def set_ini_value(text, key, value, section):
@@ -1328,6 +1755,16 @@ def cleanup_helixsr_files(game):
 
 def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenvapi=None, install_ref=None, fg_mode=None,
                     fsr4_variant=None):
+    if route_override in HELIXSR3_ROUTES:
+        game = scan_game(game_folder, None, get_steam_manifests())
+        res = helixsr3_install(game, route_override, scaler_name=opti_dll)
+        way = "HelixSR Scaler" if route_override == "scaler" else "the HLX FSR 4 drop-in"
+        notes = [m for m in res.get("messages") or [] if m]
+        msg = f"Installed HelixSR {HELIXSR3_VERSION} ({way}) for {game['name']}."
+        if notes:
+            msg += " " + " ".join(notes[-3:])
+        return {"success": True, "message": msg, "game": res.get("game")}
+
     st = get_core_status()
     if not st["weightsBuilt"]:
         raise RuntimeError(
@@ -1336,6 +1773,10 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
 
     manifests = get_steam_manifests()
     game = scan_game(game_folder, None, manifests)
+    if game.get("installed") and game.get("route") in HELIXSR3_ROUTES:
+        # going back to a HelixSR 1.8.1 way: HelixSR 3 comes out first, everything it replaced put back
+        helixsr3_remove(game)
+        game = scan_game(game_folder, None, manifests)
 
     if route_override in ("direct", "optiscaler", "dlss"):
         game["route"] = route_override
@@ -1636,7 +2077,11 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
 def uninstall_helixsr(game_folder):
     manifests = get_steam_manifests()
     game = scan_game(game_folder, None, manifests)
-    cleanup_helixsr_files(game)
+    if game.get("installed") and game.get("route") in HELIXSR3_ROUTES:
+        helixsr3_remove(game)  # upstream's bridge puts back everything HelixSR 3 replaced
+        game = scan_game(game_folder, None, manifests)
+    else:
+        cleanup_helixsr_files(game)
     if game.get("isReEngine") or game.get("installReFramework") or os.path.isfile(os.path.join(game.get("exeFolder") or game_folder, "reframework_revision.txt")):
         uninstall_reframework(game)
     return {"success": True, "message": f"Restored original files for {game['name']}."}
@@ -1899,10 +2344,42 @@ def sync_helixsr_to_installed_games():
     return count
 
 
-def start_network_build(dlss_path="", wave64=False):
+def start_network_build(dlss_path="", wave64=False, core="legacy", rebuild=False):
+    """Builds the network in the background. core="legacy": the bundled HelixSR 1.8.1; core="helixsr3": downloads
+    the official HelixSR 3 release first if needed, then runs its setup (network, HLX FSR 4)."""
     global IS_BUILDING
     if IS_BUILDING:
         return {"success": False, "error": "Build already in progress"}
+
+    if core == "helixsr3":
+        def worker3():
+            global IS_BUILDING
+            IS_BUILDING = True
+            try:
+                broadcast_build_log(
+                    f"HelixSR {HELIXSR3_VERSION}: the setup downloads NVIDIA's DLSS 310.7.0 DLL from NVIDIA's GitHub "
+                    "(NVIDIA's license) and AMD's FSR 4 driver file (from an installed AMD driver, else AMD's driver "
+                    "package, about 420 MB) and builds HLX DLSS and HLX FSR 4 on this PC. This takes several minutes."
+                )
+                helixsr3_download(log=broadcast_build_log)
+                ok = helixsr3_build(log=broadcast_build_log, rebuild=rebuild, dlss_path=dlss_path,
+                                    env=None if os.name == "nt" else get_clean_desktop_env())
+                st = helixsr3_status()
+                if ok:
+                    broadcast_build_log(f"HelixSR {HELIXSR3_VERSION} is built" +
+                                        ("" if st["hlxReady"] else " (HLX FSR 4 is not; run the build again to retry)"))
+                    n = helixsr3_update_installed_games(log=broadcast_build_log)
+                    if n:
+                        broadcast_build_log(f"Updated HelixSR {HELIXSR3_VERSION} in {n} installed game(s).")
+                else:
+                    broadcast_build_log(f"HelixSR {HELIXSR3_VERSION}'s network was not built (see the lines above).")
+            except Exception as e:
+                broadcast_build_log(f"Error during the HelixSR {HELIXSR3_VERSION} build: {e}")
+            finally:
+                IS_BUILDING = False
+
+        threading.Thread(target=worker3, daemon=True).start()
+        return {"success": True}
 
     def worker():
         global IS_BUILDING
@@ -4028,8 +4505,17 @@ def run_standalone_gui(smoke_test_ms=0):
                     ("winhttp.dll", "OptiScaler Proxy — winhttp.dll (Alternative Hook)"),
                     ("OptiScaler.asi", "OptiScaler ASI Plugin — OptiScaler.asi (ASI Loader)"),
                 ]
-                self.method_items = [("optiscaler:" + opti_options[0][0], opti_options[0][1])]
-                self.method_items.append(("direct", direct_label))
+                self.method_items = [
+                    ("scaler:dxgi.dll", f"HelixSR {HELIXSR3_VERSION} — HelixSR Scaler, dxgi.dll (Recommended: HLX DLSS + HLX FSR 4)")
+                ]
+                if has_native_fsr or game.get("route") == "hlxfsr":
+                    self.method_items.append(
+                        ("hlxfsr", f"HelixSR {HELIXSR3_VERSION} — HLX FSR 4 drop-in (replaces the game's FSR 3.1 DLL)")
+                    )
+                for dll_n in SCALER_DLL_NAMES[1:]:
+                    self.method_items.append(("scaler:" + dll_n, f"HelixSR {HELIXSR3_VERSION} — HelixSR Scaler, {dll_n}"))
+                self.method_items.append(("optiscaler:" + opti_options[0][0], "HelixSR 1.8.1 — " + opti_options[0][1]))
+                self.method_items.append(("direct", "HelixSR 1.8.1 — " + direct_label))
                 for dll_n, lbl in opti_options[1:]:
                     self.method_items.append(("optiscaler:" + dll_n, lbl))
 
@@ -4040,11 +4526,12 @@ def run_standalone_gui(smoke_test_ms=0):
                     )
 
                 self.cmb_drawer_method["values"] = [lbl for _tag, lbl in self.method_items]
-                target_tag = (
-                    game["route"]
-                    if game.get("route") in ("direct", "dlss")
-                    else "optiscaler:" + (game.get("optiDllName") or "dxgi.dll")
-                )
+                if game.get("route") in ("direct", "dlss", "hlxfsr"):
+                    target_tag = game["route"]
+                elif game.get("route") == "scaler":
+                    target_tag = "scaler:" + (game.get("optiDllName") or "dxgi.dll")
+                else:
+                    target_tag = "optiscaler:" + (game.get("optiDllName") or "dxgi.dll")
                 sel_idx = 0
                 for idx, (tag, _lbl) in enumerate(self.method_items):
                     if tag.lower() == target_tag.lower():
@@ -4081,8 +4568,11 @@ def run_standalone_gui(smoke_test_ms=0):
             idx = self.cmb_drawer_method.current()
             if 0 <= idx < len(self.method_items):
                 tag = self.method_items[idx][0]
-                if tag in ("direct", "dlss"):
+                if tag in ("direct", "dlss", "hlxfsr"):
                     self.selected_game["route"] = tag
+                elif tag.startswith("scaler:"):
+                    self.selected_game["route"] = "scaler"
+                    self.selected_game["optiDllName"] = tag.split(":", 1)[1]
                 elif tag.startswith("optiscaler:"):
                     self.selected_game["route"] = "optiscaler"
                     self.selected_game["optiDllName"] = tag.split(":", 1)[1]
@@ -4126,6 +4616,10 @@ def run_standalone_gui(smoke_test_ms=0):
             fg_tag = fg_map.get(fg_mode, "") if route == "optiscaler" else ""
             if route == "optiscaler":
                 r_disp = f"OptiScaler ({opti_dll}{fg_tag})"
+            elif route == "scaler":
+                r_disp = f"HelixSR Scaler ({opti_dll})"
+            elif route == "hlxfsr":
+                r_disp = "HLX FSR 4 drop-in (FSR 3.1)"
             elif route == "direct":
                 r_disp = "Direct (FSR 3.1)"
             else:
@@ -4162,6 +4656,37 @@ def run_standalone_gui(smoke_test_ms=0):
                         "4. Press the Insert key in-game to open OptiScaler's HUD and customize HelixSR & Frame Generation."
                     )
                 )
+            elif route in HELIXSR3_ROUTES:
+                self.panel_drawer_fg.pack_forget()
+                self.chk_drawer_fakenvapi.pack_forget()
+                if route == "scaler":
+                    self.lbl_drawer_method_hint.configure(
+                        text=(f"HelixSR {HELIXSR3_VERSION}: puts HelixSR Scaler (upstream's OptiScaler build) next to the game's .exe as "
+                              f"{opti_dll}. The game's DLSS, XeSS or FSR option runs HLX DLSS (DX12, and DX11 / Vulkan games); "
+                              "HLX FSR 4, AMD FSR and XeSS are in its menu (Insert). Installed through HelixSR's own installer.")
+                    )
+                    self.lbl_prop_method.configure(text=f"{r_disp} (Select DLSS in game)")
+                    self.lbl_drawer_guide.configure(
+                        text=(
+                            f"1. Build HelixSR {HELIXSR3_VERSION} under 'Engine & Weights' once, then click '{btn_verb}'.\n"
+                            "2. Start the game and pick NVIDIA DLSS (or XeSS / FSR) as the upscaler.\n"
+                            "3. Press Insert for HelixSR Scaler's menu: upscaler HLX DLSS, HLX FSR 4, AMD FSR or XeSS.\n"
+                            "4. HelixSR's settings (Int8, WaveSize) are under [HelixSR] in the game's OptiScaler.ini."
+                        )
+                    )
+                else:
+                    self.lbl_drawer_method_hint.configure(
+                        text=(f"HelixSR {HELIXSR3_VERSION}: replaces the game's FSR 3.1 DLL with HLX FSR 4 (AMD's FSR 4 network on "
+                              "HelixSR's own pipeline, for GPUs without FSR 4). The game's file is kept as *.original.dll.")
+                    )
+                    self.lbl_prop_method.configure(text=f"{r_disp} (Select AMD FSR in game)")
+                    self.lbl_drawer_guide.configure(
+                        text=(
+                            f"1. Build HelixSR {HELIXSR3_VERSION} under 'Engine & Weights' once, then click '{btn_verb}'.\n"
+                            "2. Start the game and pick AMD FSR 3.1 as the upscaler.\n"
+                            "3. HLX FSR 4 runs in its place; it logs to HLX_FSR.log next to the DLL."
+                        )
+                    )
             elif route == "dlss":
                 self.panel_drawer_fg.pack_forget()
                 self.chk_drawer_fakenvapi.pack_forget()
@@ -4207,7 +4732,7 @@ def run_standalone_gui(smoke_test_ms=0):
                 )
 
             proton_opt = compute_proton_launch_option(route, opti_dll, install_ref)
-            self.proton_cmd_var.set(proton_opt or "(No Proton override needed for Direct FSR 3.1)")
+            self.proton_cmd_var.set(proton_opt or "(No Proton override needed for this method)")
 
         def _open_drawer(self, game, idx=0):
             manifests = get_steam_manifests()
@@ -4313,7 +4838,18 @@ def run_standalone_gui(smoke_test_ms=0):
             if not self.selected_game:
                 return
             st = get_core_status()
-            if not st.get("weightsBuilt"):
+            route_sel = self.selected_game.get("route")
+            if route_sel in HELIXSR3_ROUTES:
+                st3 = st.get("helixsr3") or {}
+                if not st3.get("scalerReady" if route_sel == "scaler" else "dropinReady"):
+                    if messagebox.askyesno(
+                        "HelixSR Not Built",
+                        f"HelixSR {HELIXSR3_VERSION} is not built yet. Switch to the 'Engine & Weights' tab to download and build it?",
+                        parent=self.root,
+                    ):
+                        self._switch_tab("core")
+                    return
+            elif not st.get("weightsBuilt"):
                 ask = messagebox.askyesno(
                     "Network Not Built",
                     "The HelixSR network has not been built yet (HelixSR 1.8+ builds it into amd_fidelityfx_dx12.dll).\n\n"
@@ -4463,6 +4999,11 @@ def run_standalone_gui(smoke_test_ms=0):
             self.lbl_kernels_size.pack(fill="x", pady=(0, 3))
             self.lbl_toolchain_status = tk.Label(card_status, text="Local Toolchain: -", bg=self.c_card, fg=self.c_muted, font=("Sans", 9), anchor="w")
             self.lbl_toolchain_status.pack(fill="x")
+            self.lbl_helixsr3_status = tk.Label(
+                card_status, text=f"HelixSR {HELIXSR3_VERSION}: -", bg=self.c_card, fg=self.c_muted,
+                font=("Sans", 10, "bold"), anchor="w", justify="left", wraplength=640,
+            )
+            self.lbl_helixsr3_status.pack(fill="x", pady=(8, 0))
 
             # Card 2: Network Compiler Wizard
             card_builder = tk.Frame(
@@ -4516,6 +5057,18 @@ def run_standalone_gui(smoke_test_ms=0):
                 font_size=10,
             )
             self.btn_start_build.pack(side="left")
+            self.btn_start_build3 = self._make_btn(
+                btn_row,
+                f"⚡ Download & Build HelixSR {HELIXSR3_VERSION}",
+                self._on_start_build3_clicked,
+                bg=self.c_emerald_strong,
+                fg=self.c_on_accent,
+                border=self.c_border_strong,
+                padx=20,
+                pady=8,
+                font_size=10,
+            )
+            self.btn_start_build3.pack(side="left", padx=(10, 0))
 
             self.txt_build_console = tk.Text(
                 card_builder,
@@ -4563,6 +5116,29 @@ def run_standalone_gui(smoke_test_ms=0):
             start_network_build(dlss_path=dlss_path)
             self._refresh_core_ui()
 
+        def _on_start_build3_clicked(self):
+            if IS_BUILDING:
+                self._show_toast("Compilation already in progress...")
+                return
+            st3 = helixsr3_status()
+            if not messagebox.askyesno(
+                f"Build HelixSR {HELIXSR3_VERSION}",
+                (f"Download the official HelixSR {HELIXSR3_VERSION} release from lonewolf0622/HelixSR "
+                 f"({HELIXSR3_SIZE // (1 << 20)} MB) and build it on this PC?\n\n" if not st3["downloaded"] else
+                 f"Build HelixSR {HELIXSR3_VERSION} on this PC?\n\n")
+                + "HelixSR's own setup downloads NVIDIA's DLSS 310.7.0 DLL from NVIDIA's GitHub (you accept NVIDIA's "
+                "license), and AMD's FSR 4 driver file (from an installed AMD driver, else AMD's driver package, about "
+                "420 MB), then builds HLX DLSS and HLX FSR 4. It needs Proton or Wine and takes several minutes.",
+                parent=self.root,
+            ):
+                return
+            self.txt_build_console.delete("1.0", "end")
+            self.txt_build_console.insert("1.0", f"Starting the HelixSR {HELIXSR3_VERSION} build...\n")
+            sel = self.var_dlss_source.get()
+            dlss_path = self._dlss_candidate_map.get(sel, "")
+            start_network_build(dlss_path=dlss_path, core="helixsr3", rebuild=st3["networkReady"])
+            self._refresh_core_ui()
+
         def _refresh_core_ui(self):
             st = get_core_status()
             built = bool(st.get("weightsBuilt"))
@@ -4604,6 +5180,19 @@ def run_standalone_gui(smoke_test_ms=0):
                 else "Toolchain: Will download automatically on first compile"
             )
             self.btn_start_build.configure(state="disabled" if IS_BUILDING else "normal")
+            st3 = st.get("helixsr3") or helixsr3_status()
+            if st3["scalerReady"]:
+                txt3 = (f"✔ HelixSR {st3['version']}: READY (HLX DLSS through HelixSR Scaler"
+                        + (", HLX FSR 4 drop-in" if st3["dropinReady"] else "") + ")")
+                fg3 = self.c_emerald
+            elif st3["downloaded"]:
+                txt3 = f"⚠ HelixSR {st3['version']}: downloaded, NOT BUILT (Download & Build below)"
+                fg3 = self.c_amber
+            else:
+                txt3 = f"HelixSR {HELIXSR3_VERSION}: not downloaded (Download & Build below)"
+                fg3 = self.c_muted
+            self.lbl_helixsr3_status.configure(text=txt3, fg=fg3)
+            self.btn_start_build3.configure(state="disabled" if IS_BUILDING else "normal")
 
         # --------------------------------------------------------------------
         # TAB 3: CUSTOM FSR (my-fsr) (Matches BuildMyFsrPane in MainWindow.cs)

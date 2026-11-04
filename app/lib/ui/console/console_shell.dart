@@ -445,12 +445,27 @@ class _EnginePage extends StatelessWidget {
                     SizedBox(height: t.s6),
                     ConsoleRow(
                       label: m.building
-                          ? 'Building network...'
-                          : 'Build network',
-                      sub: 'compile DLSS Model E locally into the core DLL',
+                          ? 'Building...'
+                          : (c?.helixSr3?.scalerReady ?? false)
+                          ? 'Rebuild HelixSR $helixSr3Version'
+                          : 'Download + build HelixSR $helixSr3Version',
+                      sub: (c?.helixSr3?.scalerReady ?? false)
+                          ? 'HLX DLSS${(c?.helixSr3?.hlxReady ?? false) ? ' + HLX FSR 4' : ''} ready'
+                          : 'official release (${formatBytes(helixSr3Size)}), built on this device',
                       icon: PixelGlyph.bolt,
                       primary: true,
                       autofocus: true,
+                      onPressed: m.building
+                          ? null
+                          : () => m.build(release: 'helixsr3'),
+                    ),
+                    SizedBox(height: t.s3),
+                    ConsoleRow(
+                      label: m.building
+                          ? 'Building network...'
+                          : 'Build 1.8.1 network',
+                      sub: 'compile DLSS Model E locally into the core DLL',
+                      icon: PixelGlyph.bolt,
                       onPressed: m.building ? null : () => m.build(),
                     ),
                     SizedBox(height: t.s3),

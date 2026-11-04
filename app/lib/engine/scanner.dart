@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 
 import 'artwork.dart' show normalizeGameName;
 import 'constants.dart';
+import 'helixsr3.dart';
 import 'models.dart';
 import 'paths.dart';
 import 'steam.dart';
@@ -53,8 +54,25 @@ GameInfo scanGame(
 
   final (opti, dlss) = _checkOptiScalerRoute(game);
   final direct = _checkDirectRoute(game);
+  final scaler = readScalerRecord(game.target);
+  final hlx = game.fsrTargets.any(
+    (t) => isHelixSr3Marker(_readJson(p.join(p.dirname(t), markerFile))),
+  );
 
-  if (dlss) {
+  if (scaler != null) {
+    game.route = 'scaler';
+    game.installed = true;
+    game.optiDllName = scaler.$1;
+    game.scalerVersion = scaler.$2;
+    game.version =
+        binaryVersion(p.join(game.target, helixSrFolder, ownDll)) ??
+        binaryVersion(p.join(game.target, 'HelixSR-fsrfg', dllFsr)) ??
+        helixSr3Version;
+    if (dirExists(p.join(game.target, scalerBackupDir))) game.hasBackups = true;
+  } else if (hlx) {
+    game.route = 'hlxfsr';
+    game.installed = true;
+  } else if (dlss) {
     game.route = 'dlss';
     game.installed = true;
   } else if (opti) {
@@ -67,6 +85,7 @@ GameInfo scanGame(
     game.route = 'optiscaler';
     game.optiDllName = 'dxgi.dll';
   }
+  if (game.installed) game.installedRoute = game.route;
   return game;
 }
 
@@ -116,7 +135,8 @@ void _scanDir(String dir, int depth, int maxDepth, _Walk w, GameInfo game) {
 
     var hasOptiMarker = false;
     for (final f in files) {
-      if (p.basename(f.path).toLowerCase() == 'optiscaler.ini') {
+      final n = p.basename(f.path).toLowerCase();
+      if (n == 'optiscaler.ini' || n == scalerRecord.toLowerCase()) {
         hasOptiMarker = true;
         w.bestExeDir = dir;
         w.bestExeSize = _huge;
@@ -169,10 +189,15 @@ void _scanDir(String dir, int depth, int maxDepth, _Walk w, GameInfo game) {
     }
 
     if (depth < maxDepth) {
+      final scalerHere = fileExists(p.join(dir, scalerRecord));
       for (final d in entries.whereType<Directory>()) {
-        if (p.basename(d.path).toLowerCase() != helixSrFolder.toLowerCase()) {
-          _scanDir(d.path, depth + 1, maxDepth, w, game);
+        final n = p.basename(d.path).toLowerCase();
+        // HelixSR's own folders, and HelixSR Scaler's OptiScaler folder (HLX
+        // FSR 4 and AMD's FSR DLLs there are not the game's FSR 3.1).
+        if (scanSkipDirs.contains(n) || (scalerHere && n == 'optiscaler')) {
+          continue;
         }
+        _scanDir(d.path, depth + 1, maxDepth, w, game);
       }
     }
   } catch (_) {}

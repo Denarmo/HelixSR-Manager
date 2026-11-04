@@ -20,7 +20,7 @@ import { applyOverrides, overridesFrom } from "./launchOptions";
 // Backend (main.py)
 // ---------------------------------------------------------------------------
 
-type Route = "optiscaler" | "direct" | "dlss";
+type Route = "optiscaler" | "direct" | "dlss" | "scaler" | "hlxfsr";
 
 interface Game {
   id: string;
@@ -44,6 +44,19 @@ interface Game {
   inputs?: string[];
   protonLaunchOptions?: string;
   fsr4Variant?: string | null;
+  helixsr3?: boolean;
+  scalerVersion?: string | null;
+  hasFsr31?: boolean;
+}
+
+interface HelixSR3Status {
+  version: string;
+  downloaded: boolean;
+  networkReady: boolean;
+  hlxReady: boolean;
+  scalerReady: boolean;
+  dropinReady: boolean;
+  downloadSize: number;
 }
 
 interface Option {
@@ -62,7 +75,9 @@ interface Status {
   weightsBuilt: boolean;
   networkEmbedded: boolean;
   building: boolean;
+  helixsr3?: HelixSR3Status;
   capabilities: {
+    helixsr3?: { version: string; routes: Route[]; scalerDlls: string[]; downloadSize: number } | null;
     fsr4Variants: Option[];
     dlssLoader: boolean;
     optiDlls: string[];
@@ -97,7 +112,7 @@ const uninstallGame = callable<[folder: string], Result>("uninstall");
 const clearCache = callable<[folder: string], Result & { cleared?: boolean }>("clear_cache");
 const getSettings = callable<[], Settings>("get_settings");
 const setSettings = callable<[settings: Settings], Settings>("set_settings");
-const startBuild = callable<[], Result>("start_build");
+const startBuild = callable<[core: string], Result>("start_build");
 const buildStatus = callable<[], BuildState>("build_status");
 
 // ---------------------------------------------------------------------------
@@ -147,9 +162,11 @@ async function syncLaunchOptions(game: Game, settings: Settings): Promise<{ opti
 // ---------------------------------------------------------------------------
 
 const ROUTES: { id: Route; label: string }[] = [
-  { id: "optiscaler", label: "OptiScaler (DLSS / XeSS / FSR games)" },
-  { id: "direct", label: "Direct FSR 3.1 replacement" },
-  { id: "dlss", label: "DLSS Loader (experimental)" },
+  { id: "scaler", label: "HelixSR Scaler (HLX DLSS, recommended)" },
+  { id: "hlxfsr", label: "HLX FSR 4 drop-in (FSR 3.1 games)" },
+  { id: "optiscaler", label: "1.8.1: OptiScaler (DLSS / XeSS / FSR games)" },
+  { id: "direct", label: "1.8.1: Direct FSR 3.1 replacement" },
+  { id: "dlss", label: "1.8.1: DLSS Loader (experimental)" },
 ];
 
 function notify(title: string, body: string) {
@@ -229,7 +246,9 @@ function Content() {
   // Reset the options to what the selected game has (or sensible defaults).
   useEffect(() => {
     if (!game) return;
-    setRoute(game.route === "dlss" && !caps?.dlssLoader ? "optiscaler" : game.route);
+    const h3Ready = !!caps?.helixsr3 && !!status?.helixsr3?.scalerReady;
+    if (!game.installed && h3Ready) setRoute("scaler");
+    else setRoute(game.route === "dlss" && !caps?.dlssLoader ? "optiscaler" : game.route);
     setOptiDll(game.optiDllName || "dxgi.dll");
     setFgMode(game.fgMode || "auto");
     setFakeNvapi(game.useFakeNvapi !== false);
@@ -248,7 +267,7 @@ function Content() {
       setBuild(st);
       if (st.state !== "running") {
         setStatus(await getStatus());
-        notify("HelixSR", st.state === "done" ? "Network built. You can install HelixSR now." : st.error || "Build failed");
+        notify("HelixSR", st.state === "done" ? "HelixSR is built. You can install it now." : st.error || "Build failed");
       }
     }, 2000);
     return () => clearInterval(t);
@@ -280,6 +299,7 @@ function Content() {
     run("install", async () => {
       if (!game) return;
       const opts: Record<string, unknown> = { route };
+      if (route === "scaler") opts.optiDll = scalerDlls.includes(optiDll) ? optiDll : "dxgi.dll";
       if (route === "optiscaler") {
         opts.optiDll = optiDll;
         opts.fgMode = fgMode;
@@ -316,18 +336,26 @@ function Content() {
       notify("HelixSR", res.cleared === false ? "No shader cache found" : "Shader cache cleared");
     });
 
-  const doBuild = () =>
+  const doBuild = (core: "legacy" | "helixsr3" = "legacy") =>
     showModal(
       <ConfirmModal
-        strTitle="Build the HelixSR network"
+        strTitle={core === "helixsr3" ? `Download and build HelixSR ${h3?.version ?? ""}` : "Build the HelixSR network"}
         strDescription={
-          "HelixSR builds its network on this device from NVIDIA's DLSS 310.7.0 DLL (taken from one of your games, " +
-          "or downloaded from NVIDIA's GitHub, which means you accept NVIDIA's license). " +
-          "It also downloads Python and Microsoft's shader compiler once. This takes several minutes; keep the device plugged in."
+          core === "helixsr3"
+            ? (h3?.downloaded
+                ? ""
+                : `Downloads the official HelixSR ${h3?.version ?? ""} release from lonewolf0622/HelixSR ` +
+                  `(${Math.round((caps?.helixsr3?.downloadSize ?? 0) / 1048576)} MB). `) +
+              "HelixSR's own setup then downloads NVIDIA's DLSS 310.7.0 DLL from NVIDIA's GitHub (you accept NVIDIA's " +
+              "license) and AMD's FSR 4 driver package (about 420 MB), and builds HLX DLSS and HLX FSR 4 on this device. " +
+              "This takes several minutes; keep the device plugged in."
+            : "HelixSR builds its network on this device from NVIDIA's DLSS 310.7.0 DLL (taken from one of your games, " +
+              "or downloaded from NVIDIA's GitHub, which means you accept NVIDIA's license). " +
+              "It also downloads Python and Microsoft's shader compiler once. This takes several minutes; keep the device plugged in."
         }
         strOKButtonText="Build"
         onOK={async () => {
-          const res = await startBuild();
+          const res = await startBuild(core);
           if (!res.success) {
             setError(res.error || "Could not start the build");
             return;
@@ -352,6 +380,15 @@ function Content() {
   }
 
   const ready = !!status?.weightsBuilt;
+  const h3 = caps?.helixsr3 ? status?.helixsr3 : undefined;
+  const scalerDlls = caps?.helixsr3?.scalerDlls ?? ["dxgi.dll"];
+  const routeReady = route === "scaler" ? !!h3?.scalerReady : route === "hlxfsr" ? !!h3?.dropinReady : ready;
+  const routeOptions = ROUTES.filter((r) => {
+    if (r.id === "dlss") return !!caps?.dlssLoader;
+    if (r.id === "scaler") return !!h3;
+    if (r.id === "hlxfsr") return !!h3 && !!game && (!!game.hasFsr31 || game.route === "hlxfsr");
+    return true;
+  });
   const building = build?.state === "running";
   const lastLine = build?.log?.[build.log.length - 1];
 
@@ -366,14 +403,36 @@ function Content() {
       )}
 
       <PanelSection title="Engine">
+        {h3 && (
+          <>
+            <PanelSectionRow>
+              <Field label={`HelixSR ${h3.version}`} focusable={false}>
+                {h3.scalerReady
+                  ? h3.dropinReady
+                    ? "Ready (HLX DLSS, HLX FSR 4)"
+                    : "Ready (HLX DLSS)"
+                  : h3.downloaded
+                    ? "Not built"
+                    : "Not downloaded"}
+              </Field>
+            </PanelSectionRow>
+            {!h3.scalerReady && (
+              <PanelSectionRow>
+                <ButtonItem layout="below" disabled={building} onClick={() => doBuild("helixsr3")}>
+                  {building ? "Building..." : h3.downloaded ? `Build HelixSR ${h3.version}` : `Download and build HelixSR ${h3.version}`}
+                </ButtonItem>
+              </PanelSectionRow>
+            )}
+          </>
+        )}
         <PanelSectionRow>
-          <Field label={`HelixSR ${status?.version ?? ""}`} focusable={false}>
+          <Field label={`HelixSR ${status?.version ?? ""}${h3 ? " (1.8.1 methods)" : ""}`} focusable={false}>
             {ready ? "Network ready" : status?.coreExists ? "Network not built" : "Core missing"}
           </Field>
         </PanelSectionRow>
         {!ready && (
           <PanelSectionRow>
-            <ButtonItem layout="below" disabled={building || !status?.coreExists} onClick={doBuild}>
+            <ButtonItem layout="below" disabled={building || !status?.coreExists} onClick={() => doBuild("legacy")}>
               {building ? "Building network..." : "Build network"}
             </ButtonItem>
           </PanelSectionRow>
@@ -424,11 +483,23 @@ function Content() {
           <PanelSectionRow>
             <DropdownItem
               label="Method"
-              rgOptions={ROUTES.filter((r) => r.id !== "dlss" || caps?.dlssLoader).map((r) => ({ data: r.id, label: r.label }))}
+              rgOptions={routeOptions.map((r) => ({ data: r.id, label: r.label }))}
               selectedOption={route}
               onChange={(o) => setRoute(o.data)}
             />
           </PanelSectionRow>
+
+          {route === "scaler" && (
+            <PanelSectionRow>
+              <DropdownItem
+                label="HelixSR Scaler file name"
+                description="dxgi.dll needs no launch option. Press Insert in game for HelixSR Scaler's menu."
+                rgOptions={scalerDlls.map((d) => ({ data: d, label: d }))}
+                selectedOption={scalerDlls.includes(optiDll) ? optiDll : "dxgi.dll"}
+                onChange={(o) => setOptiDll(o.data)}
+              />
+            </PanelSectionRow>
+          )}
 
           {route === "optiscaler" && (
             <>
@@ -478,7 +549,7 @@ function Content() {
           )}
 
           <PanelSectionRow>
-            <ButtonItem layout="below" disabled={!ready || !!busy} onClick={doInstall}>
+            <ButtonItem layout="below" disabled={!routeReady || !!busy} onClick={doInstall}>
               {busy === "install" ? "Installing..." : game.installed ? "Reinstall HelixSR" : "Install HelixSR"}
             </ButtonItem>
           </PanelSectionRow>

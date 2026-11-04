@@ -53,8 +53,8 @@ class ConsoleGameScreen extends StatelessWidget {
             final g = model.games.where((x) => x.id == gameId).firstOrNull;
             if (g == null) return const SizedBox.shrink();
             final busy = model.isBusy(g);
-            final built = model.core?.weightsBuilt ?? false;
-            final choices = routeChoices(model.core);
+            final built = model.core?.routeReady(g.route) ?? false;
+            final choices = routeChoices(model.core, g);
             final fgLocked = g.fgMode.startsWith('dlssg_');
             return Column(
               children: [
@@ -152,7 +152,7 @@ class ConsoleGameScreen extends StatelessWidget {
                                       : (g.installed ? 'Reinstall' : 'Install'),
                                   sub: built
                                       ? g.routeDisplay
-                                      : 'network not built: open ENGINE first',
+                                      : notReadyText(g.route).substring(2),
                                   icon: PixelGlyph.download,
                                   primary: true,
                                   autofocus: true,
@@ -190,6 +190,31 @@ class ConsoleGameScreen extends StatelessWidget {
                                           ),
                                         ),
                                 ),
+                                if (g.route == 'scaler') ...[
+                                  SizedBox(height: t.s3),
+                                  ConsoleRow(
+                                    label: 'File name',
+                                    value:
+                                        scalerDllNames.contains(g.optiDllName)
+                                        ? g.optiDllName
+                                        : scalerDllNames.first,
+                                    sub: 'Insert in game: HelixSR Scaler menu',
+                                    onStep: busy
+                                        ? null
+                                        : (d) => model.edit(
+                                            g,
+                                            (x) => x.optiDllName = cycle(
+                                              scalerDllNames,
+                                              scalerDllNames.contains(
+                                                    x.optiDllName,
+                                                  )
+                                                  ? x.optiDllName
+                                                  : scalerDllNames.first,
+                                              d,
+                                            ),
+                                          ),
+                                  ),
+                                ],
                                 if (g.route == 'optiscaler') ...[
                                   SizedBox(height: t.s3),
                                   ConsoleRow(

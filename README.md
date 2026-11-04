@@ -1,7 +1,7 @@
 # ⚡ HelixSR Manager
 
 [![Release](https://img.shields.io/badge/Release-v2.0.0-F1C40F?style=for-the-badge)](https://github.com/Denarmo/HelixSR-Manager/releases)
-[![HelixSR Core](https://img.shields.io/badge/HelixSR_Core-v1.8.1-39D5FF?style=for-the-badge)](https://github.com/lonewolf0622/HelixSR)
+[![HelixSR](https://img.shields.io/badge/HelixSR-v3.2.0_%2B_bundled_v1.8.1-39D5FF?style=for-the-badge)](https://github.com/lonewolf0622/HelixSR)
 [![Platform](https://img.shields.io/badge/Platform-Windows_10%2F11_%7C_Linux_%26_SteamOS-10B981?style=for-the-badge)](#%EF%B8%8F-installation--quick-start)
 [![Dependencies](https://img.shields.io/badge/Dependencies-Zero_(100%25_Standalone)-8B5CF6?style=for-the-badge)](#%EF%B8%8F-installation--quick-start)
 [![License](https://img.shields.io/badge/License-MIT_%2B_Third--Party-F59E0B?style=for-the-badge)](#%EF%B8%8F-legal-disclaimers-licensing--third-party-notices)
@@ -53,9 +53,23 @@ A new cross-platform Flutter app lives in [`app/`](app/README.md). It uses the D
 
 Build and run with `cd app && flutter run -d linux` (or `-d windows`). The WPF and Python editions remain. Note: the Dart engine mirrors `Engine.cs` as of this release; engine additions made elsewhere (for example Unity game support) are not ported yet.
 
+## 🧬 HelixSR 3.2.0 (HLX DLSS, HLX FSR 4, HelixSR Scaler)
+
+Upstream [HelixSR](https://github.com/lonewolf0622/HelixSR) moved from 1.8.1 to 3.2.0. The big changes: **HLX DLSS** (DLSS Model E on HelixSR's faster pipeline, with an 8-bit path on GPUs with fast int8), **HLX FSR 4** (AMD's FSR 4 network on GPUs that don't have FSR 4, Steam Deck and other RDNA 2 handhelds included), and **HelixSR Scaler**, upstream's own OptiScaler build, which also brings HLX DLSS to DirectX 11 and Vulkan games and lists HLX DLSS, HLX FSR 4, AMD FSR and XeSS in its in-game menu (Insert). The experimental DLSS loader is gone upstream.
+
+HelixSR Manager supports it next to the bundled 1.8.1 core, in the Flutter app, the Linux/SteamOS edition and the Decky plugin:
+
+- **ENGINE > HelixSR 3.2.0 > Download + build** downloads the official `HelixSR-3.2.0.zip` from upstream's releases (checked by SHA-256) into `~/.local/share/HelixSR/core/HelixSR-3.2.0` (Windows: `%LOCALAPPDATA%\HelixSR\core`), then runs upstream's own setup to build HLX DLSS and HLX FSR 4 on your PC. The setup downloads NVIDIA's DLSS 310.7.0 DLL from NVIDIA's GitHub (NVIDIA's license) and reads AMD's FSR 4 driver file from an installed AMD driver or AMD's driver package (about 420 MB). It needs Proton or Wine on Linux and takes a few minutes. The Manager stops the setup before its own game list and installs games itself.
+- **Method: HelixSR Scaler** (recommended) puts HelixSR Scaler next to the game's .exe (as `dxgi.dll` by default, which needs no Steam launch option). Pick DLSS (or XeSS / FSR) in the game. HelixSR's settings (`Int8`, `WaveSize`) are under `[HelixSR]` in the game's `OptiScaler.ini`.
+- **Method: HLX FSR 4** (games with FSR 3.1) replaces only the game's FSR 3.1 DLL with HLX FSR 4; the game's file is kept as `*.original.dll`. Pick AMD FSR in the game.
+- Installs and removals go through upstream's own installer (`setup/helixsr_bridge.py`, the interface HelixSR Desktop uses), so HelixSR Desktop, upstream's setup scripts and the Manager see and can update or remove each other's installs. Switching a game between a 1.8.1 method and a 3.2.0 method removes the other one first. After a rebuild, every game with HelixSR 3.2.0 is updated.
+- Already have the release extracted (for upstream's setup scripts)? Set `HELIXSR3_RELEASE` to its folder (or `"helixsr3Release"` in the Linux edition's `config.json`) to use it instead of downloading.
+
+HelixSR 3.x is not shipped inside HelixSR Manager: since 1.9 its license only allows redistributing it unmodified as a complete official release, so the Manager downloads that release from upstream instead. The 1.8.1 methods (OptiScaler with FSR 4 Lite, Direct FSR 3.1, DLSS loader, REFramework, Unity and inZOI profiles) stay as they were. The WPF (Windows) edition still has the 1.8.1 methods only; use the Flutter app for HelixSR 3.2.0 on Windows.
+
 ## 🔌 Decky Plugin (SteamOS Game Mode)
 
-A companion [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin lives in [`decky-plugin/`](decky-plugin/README.md). From the Quick Access Menu it picks the running game, installs, switches or removes HelixSR with the same options as the desktop app (including the **FSR 4 Lite** model for handhelds), sets the Steam launch options for you, and can build the network on the device. Install it in Game Mode via Decky settings > Developer > Install Plugin from URL with `https://github.com/Denarmo/HelixSR-Manager/releases/download/decky-v1.0.0/helixsr-manager-decky.zip`.
+A companion [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin lives in [`decky-plugin/`](decky-plugin/README.md). From the Quick Access Menu it picks the running game, installs, switches or removes HelixSR with the same options as the desktop app (including the **FSR 4 Lite** model for handhelds), sets the Steam launch options for you, and can build the network on the device. Install it in Game Mode via Decky settings > Developer > Install Plugin from URL with `https://github.com/Denarmo/HelixSR-Manager/releases/download/decky-v1.2.0/helixsr-manager-decky.zip`.
 
 ---
 
@@ -483,7 +497,8 @@ This distribution is a multi-license aggregation. Each component is governed by 
    - OptiScaler is distributed alongside HelixSR as a separate, independent program (mere aggregation under GPLv3 Section 5). Neither HelixSR nor HelixSR Manager links against or incorporates GPL-licensed source code.
 5. **fakenvapi (`helixsr_core/HelixSR-1.8.1/optiscaler/fakenvapi.dll` & `fakenvapi.ini`)**:
    - Included unmodified under the **[MIT License](helixsr_core/HelixSR-1.8.1/optiscaler/fakenvapi-LICENSE.txt)**. Source code: [https://github.com/FakeMichau/fakenvapi](https://github.com/FakeMichau/fakenvapi).
-6. **AMD FidelityFX Upscaler (`helixsr_core/HelixSR-1.8.1/amd-fsr/amd_fidelityfx_upscaler_dx12.dll`)**:
+6. **HelixSR 3.x (not included)**: HelixSR 3.2.0 is downloaded at runtime, unmodified and complete, from the official release at [github.com/lonewolf0622/HelixSR/releases](https://github.com/lonewolf0622/HelixSR/releases) and is governed by the HelixSR Freeware License in that release. HelixSR Manager does not redistribute it, does not modify it, and runs its setup and installer scripts as published. HelixSR Scaler in that release is GPL-3.0 (based on OptiScaler); see its `SOURCE.md`.
+7. **AMD FidelityFX Upscaler (`helixsr_core/HelixSR-1.8.1/amd-fsr/amd_fidelityfx_upscaler_dx12.dll`)**:
    - Copyright © Advanced Micro Devices, Inc. Included unmodified in binary form under the **[AMD FidelityFX License](helixsr_core/HelixSR-1.8.1/amd-fsr/FidelityFX_v2_LICENSE.md)** and MIT-licensed Lanczos weight approximation notice in **[THIRD_PARTY_NOTICES.md](helixsr_core/HelixSR-1.8.1/THIRD_PARTY_NOTICES.md)**.
 
 ### 4. Anti-Cheat & Online Multiplayer Warning

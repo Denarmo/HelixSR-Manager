@@ -6,7 +6,8 @@ A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin that 
 
 - Picks the game you are playing (or any supported game in your library) and shows whether HelixSR is installed, with which method and version.
 - Installs HelixSR with the same options as the desktop app: OptiScaler (proxy DLL choice, frame generation mode, FakeNVAPI), Direct FSR 3.1 replacement, the experimental DLSS Loader, and REFramework Nightly for RE Engine games.
-- **FSR 4 model picker** (OptiScaler route): full FSR 4 or **FSR 4 Lite**, the lighter INT8 model for handheld APUs. The picker appears once the HelixSR engine in your build supports it, and defaults to Lite.
+- **HelixSR 3.2.0**: Engine > *Download and build HelixSR 3.2.0* fetches the official release from upstream's GitHub and builds HLX DLSS and HLX FSR 4 on the device (it needs Proton, which Game Mode already has). Then pick **HelixSR Scaler** (HLX DLSS through the game's DLSS option, HLX FSR 4 in its Insert menu) or, for games with FSR 3.1, the **HLX FSR 4 drop-in**. Installs go through upstream's own installer, so the desktop apps and upstream's setup see them too.
+- **FSR 4 model picker** (1.8.1 OptiScaler route): full FSR 4 or **FSR 4 Lite**, the lighter INT8 model for handheld APUs. The picker appears once the HelixSR engine in your build supports it, and defaults to Lite.
 - Sets the game's Steam launch options (`WINEDLLOVERRIDES="dxgi=n,b" %command%` and friends) for you on install, switches them when you change the proxy DLL, and takes them out again on uninstall. Anything else you have in the launch options is left alone. You can turn this off in the plugin's settings.
 - Builds the HelixSR network on the device (same compiler as the desktop app), clears shader caches and rescans the library.
 
@@ -38,7 +39,7 @@ You need Decky Loader installed (see its README). Then use one of these:
 Decky settings > **Developer** > **Install Plugin from URL**, and enter:
 
 ```
-https://github.com/Denarmo/HelixSR-Manager/releases/download/decky-v1.0.0/helixsr-manager-decky.zip
+https://github.com/Denarmo/HelixSR-Manager/releases/download/decky-v1.2.0/helixsr-manager-decky.zip
 ```
 
 The `Decky plugin` GitHub workflow builds the zip and publishes it as the `decky-v<version>` release whenever the plugin, the Linux engine or the core changes on `main`.
@@ -47,7 +48,7 @@ The `Decky plugin` GitHub workflow builds the zip and publishes it as the `decky
 
 ```bash
 sudo rm -rf ~/homebrew/plugins/helixsr-manager
-sudo python3 -m zipfile -e helixsr-manager-decky-1.0.0.zip ~/homebrew/plugins/
+sudo python3 -m zipfile -e helixsr-manager-decky-1.2.0.zip ~/homebrew/plugins/
 sudo systemctl restart plugin_loader
 ```
 

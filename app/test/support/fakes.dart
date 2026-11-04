@@ -101,10 +101,14 @@ List<GameInfo> fakeLibrary() => [
 ];
 
 class FakeEngine implements EngineApi {
-  FakeEngine({List<GameInfo>? games, this.built = true})
+  FakeEngine({List<GameInfo>? games, this.built = true, this.built3 = false})
     : library = games ?? fakeLibrary();
   final List<GameInfo> library;
   final bool built;
+
+  /// HelixSR 3 downloaded and built.
+  final bool built3;
+  String? lastBuildCore;
   final installs = <String>[];
   final uninstalls = <String>[];
 
@@ -139,6 +143,14 @@ class FakeEngine implements EngineApi {
     dllSize: 52428800,
     hasPython: true,
     dlssLoaderAvailable: true,
+    helixSr3: HelixSr3Status(
+      version: helixSr3Version,
+      releaseDir: '/data/HelixSR/core/HelixSR-$helixSr3Version',
+      downloaded: built3,
+      networkReady: built3,
+      hlxReady: built3,
+      scalerPresent: built3,
+    ),
   );
 
   @override
@@ -154,7 +166,9 @@ class FakeEngine implements EngineApi {
     required String dlssPath,
     required void Function(String) log,
     required List<GameInfo> Function() games,
+    String core = 'legacy',
   }) async {
+    lastBuildCore = core;
     log('Starting HelixSR network compiler');
     log('extracting weights ... ok');
     log('Build finished successfully!');

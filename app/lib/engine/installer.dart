@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import 'constants.dart';
 import 'core.dart';
 import 'extras.dart';
+import 'helixsr3.dart';
 import 'ini.dart';
 import 'models.dart';
 import 'paths.dart';
@@ -42,6 +43,22 @@ Future<void> installHelixSr(GameInfo game, {void Function(String)? log}) async {
   final core = Core.instance;
   void say(String m) => log?.call(m);
 
+  if (helixSr3Routes.contains(game.route)) {
+    // A HelixSR 1.8.1 install made by this Manager comes out first, with the
+    // Manager's own records, before upstream's installer takes the game.
+    if (game.installedRoute != null &&
+        !helixSr3Routes.contains(game.installedRoute)) {
+      say('removing the HelixSR 1.8.1 install first');
+      cleanupHelixSrFiles(game);
+    }
+    say('installing HelixSR $helixSr3Version through its own installer');
+    for (final m in helixSr3Install(game)) {
+      say(m);
+    }
+    say('done');
+    return;
+  }
+
   if (!core.exists) {
     throw EngineException('HelixSR core folder missing at: ${core.dir}');
   }
@@ -50,6 +67,14 @@ Future<void> installHelixSr(GameInfo game, {void Function(String)? log}) async {
       "The HelixSR network has not been built yet.\nGo to ENGINE and build the HelixSR network first "
       '(HelixSR 1.8+ embeds the network into $dllFsr).',
     );
+  }
+
+  // Going back to a HelixSR 1.8.1 way: HelixSR 3 comes out first, everything
+  // it replaced put back by upstream's bridge.
+  if (helixSr3Routes.contains(game.installedRoute)) {
+    say('removing HelixSR $helixSr3Version first');
+    helixSr3Remove(game);
+    game.installedRoute = null;
   }
 
   // Start clean so switching routes or proxy DLL names leaves nothing behind.
@@ -494,7 +519,11 @@ void cleanupHelixSrFiles(GameInfo game) {
 }
 
 void uninstallHelixSr(GameInfo game) {
-  cleanupHelixSrFiles(game);
+  if (helixSr3Routes.contains(game.installedRoute)) {
+    helixSr3Remove(game);
+  } else {
+    cleanupHelixSrFiles(game);
+  }
   if (game.isReEngine ||
       game.installReFramework ||
       fileExists(p.join(game.target, 'reframework_revision.txt'))) {
@@ -521,10 +550,13 @@ int syncHelixSrToInstalledGames(List<GameInfo> games) {
   var count = 0;
   for (final g in games) {
     if (!g.installed) continue;
+    // What is on disk, not what the UI may have picked since the scan.
+    final route = g.installedRoute ?? g.route;
+    if (helixSr3Routes.contains(route)) continue;
     try {
       var updated = false;
       final t = g.target;
-      if (g.route == 'optiscaler' && t.isNotEmpty) {
+      if (route == 'optiscaler' && t.isNotEmpty) {
         for (final dir in [
           p.join(t, helixSrFolder),
           p.join(t, '_storage_', helixSrFolder),
@@ -536,7 +568,7 @@ int syncHelixSrToInstalledGames(List<GameInfo> games) {
           updated = true;
         }
         _updateMarkerVersion(p.join(t, helixSrFolder, markerFile));
-      } else if (g.route == 'dlss' && t.isNotEmpty) {
+      } else if (route == 'dlss' && t.isNotEmpty) {
         final c = p.join(t, nvngxCoreDll);
         if (fileExists(c) && isHelixSrBinary(c)) {
           File(src).copySync(c);
@@ -544,7 +576,7 @@ int syncHelixSrToInstalledGames(List<GameInfo> games) {
           _updateMarkerVersion(p.join(t, helixSrFolder, markerFile));
           updated = true;
         }
-      } else if (g.route == 'direct') {
+      } else if (route == 'direct') {
         var anyTarget = false;
         for (final target in g.fsrTargets) {
           final dir = p.dirname(target);

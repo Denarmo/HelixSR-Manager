@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 
 import 'constants.dart';
+import 'helixsr3.dart';
 import 'models.dart';
 import 'paths.dart';
 
@@ -105,6 +106,7 @@ class Core {
       dllSize: fileSize(fsrDll),
       hasPython: pyOk,
       dlssLoaderAvailable: dlssLoaderAvailable,
+      helixSr3: helixSr3Status(),
     );
   }
 

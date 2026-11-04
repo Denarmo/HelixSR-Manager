@@ -127,7 +127,7 @@ class Plugin:
     async def build_status(self):
         return await self._call("build_status")
 
-    async def start_build(self):
+    async def start_build(self, core="legacy"):
         if self._build_proc and self._build_proc.poll() is None:
             return {"success": False, "error": "A build is already running"}
         st = await self._call("build_status")
@@ -137,7 +137,7 @@ class Plugin:
         if not py:
             return {"success": False, "error": "Building the network needs python3 (found none on this system)."}
         self._build_proc = subprocess.Popen(
-            [py, "-B", BRIDGE, "build_run", "{}"],
+            [py, "-B", BRIDGE, "build_run", json.dumps({"core": "helixsr3" if core == "helixsr3" else "legacy"})],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -145,7 +145,7 @@ class Plugin:
             cwd=PY_MODULES,
             start_new_session=True,
         )
-        decky.logger.info(f"network build started (pid {self._build_proc.pid})")
+        decky.logger.info(f"network build started ({core}, pid {self._build_proc.pid})")
         return {"success": True}
 
     # ----- lifecycle -----

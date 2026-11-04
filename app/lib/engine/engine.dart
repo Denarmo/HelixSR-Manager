@@ -22,6 +22,7 @@ export 'core.dart'
         hasEmbeddedNetwork,
         isHelixSrBinary,
         isDlssLoaderBinary,
+        networkBuilt,
         readEmbeddedNetwork;
 export 'extras.dart' show clearShaderCache, inZoiUserSettingsPath;
 export 'helixsr3.dart';

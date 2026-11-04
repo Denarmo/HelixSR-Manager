@@ -18,11 +18,11 @@ Everything is done by the HelixSR Manager Linux engine (`src/linux/helixsr_swapp
 The plugin uses the first of these that has a built network, else the first one it can write to:
 
 1. `corePath` in the plugin's `settings.json`, or `$HELIXSR_CORE`
-2. the core of an installed HelixSR Manager (Python edition, found through `~/.local/share/HelixSR/app_dir.txt`)
-3. `~/.local/share/HelixSR/core/HelixSR-<version>` (the copy the Flutter app makes)
+2. the core of an installed HelixSR Manager (Linux edition or Flutter app, found through `~/.local/share/HelixSR/app_dir.txt`, which both write on start)
+3. `~/.local/share/HelixSR/core/HelixSR-<version>` (the shared copy; the desktop apps use it too when their own core has no network yet)
 4. the core bundled in the plugin, copied to (3) so the network can be built into it
 
-So if you already built the network in HelixSR Manager, the plugin uses it straight away. If not, press **Build network** in the plugin.
+So if you already built the network in HelixSR Manager, the plugin uses it straight away, and a network built in the plugin is used by the desktop apps. If not, press **Build network** in the plugin.
 
 ## Install on the handheld
 

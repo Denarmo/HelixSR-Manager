@@ -420,10 +420,24 @@ def _is_optiscaler_binary(path):
         return False
 
 
+HELPER_EXE_RE = re.compile(r"(crashhandler|crashreport|unins|setup|redist|vc_?redist|dxsetup|launcherhelper|easyanticheat"
+                           r"|battleye|ue4prereq|dotnet)", re.IGNORECASE)
+
+
+def find_game_exe(folder):
+    """The engine leaves exeName empty for some games (Unity puts a crash handler next to the game). Look for the
+    Windows executable ourselves, skipping crash handlers, installers and redistributables."""
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.lower().endswith(".exe") and not HELPER_EXE_RE.search(n))
+    except OSError:
+        return None
+    return names[0] if names else None
+
+
 def eligibility(game):
     """Can FSR 4 Lite go into this game? game is a scan result from the HelixSR engine."""
     reasons = []
-    exe = game.get("exeName") or ""
+    exe = game.get("exeName") or find_game_exe(game.get("exeFolder") or game.get("folder") or "") or ""
     if not exe.lower().endswith(".exe"):
         reasons.append("No Windows game executable found (FSR 4 Lite is for Proton games)")
     ac = find_anticheat(game.get("folder") or game.get("exeFolder") or "")
@@ -451,13 +465,29 @@ def _pick_proxy(exe_folder, wanted):
     return None
 
 
-def _apply_ini(exe_folder, mode, verbose):
+def game_extra_ini(game):
+    """Per-game OptiScaler settings on top of the Lite/fallback preset."""
+    extra = []
+    # OptiScaler disables DXGI spoofing for Unity ("Quirk: Dxgi spoofing disabled by default"). Unity games with
+    # DLSS (for example the TND upscaling framework) then see an AMD GPU, never create DLSS and fall back to their own
+    # shader upscaler, which OptiScaler cannot intercept. Spoofing brings the DLSS inputs back.
+    inputs = game.get("inputs") or []
+    if game.get("isUnity") and ("DLSS" in inputs or game.get("foundNvngxDlssPath")):
+        extra.append(["Spoofing", "Dxgi", "true"])
+    return extra
+
+
+def _apply_ini(exe_folder, mode, verbose, extra=None):
+    if extra is None:
+        extra = (_manifest(exe_folder) or {}).get("extraIni") or []
     ini_path = os.path.join(exe_folder, "OptiScaler.ini")
     with open(ini_path, "r", encoding="utf-8", errors="ignore") as f:
         txt = f.read()
     values = dict(COMMON_INI)
     values.update(LITE_INI if mode == "lite" else FALLBACK_INI)
     values[("Log", "LogLevel")] = LOG_VERBOSE if verbose else LOG_NORMAL
+    for sec, key, val in extra:
+        values[(sec, key)] = val
     with open(ini_path + ".tmp", "w", encoding="utf-8", newline="\r\n") as f:
         f.write(set_ini_values(txt, values))
     os.replace(ini_path + ".tmp", ini_path)
@@ -535,7 +565,8 @@ def install(game, proxy="dxgi.dll", mode="lite"):
         placed.append(chosen)
         shutil.copy2(os.path.join(root, "OptiScaler.ini"), os.path.join(exe_folder, "OptiScaler.ini"))
         placed.append("OptiScaler.ini")
-        _apply_ini(exe_folder, mode, verbose=True)
+        extra = game_extra_ini(game)
+        _apply_ini(exe_folder, mode, verbose=True, extra=extra)
         _write_json(os.path.join(exe_folder, MANIFEST), {
             "tool": "HelixSR Manager (Decky) FSR 4 Lite",
             "optiscaler": OPTISCALER_VERSION,
@@ -547,6 +578,7 @@ def install(game, proxy="dxgi.dll", mode="lite"):
             "hashes": {p: sha256_file(os.path.join(exe_folder, p)) for p in placed if p != "OptiScaler.ini"},
             "installedAt": int(time.time()),
             "verification": None,
+            "extraIni": extra,
         })
     except Exception:
         _remove_placed(exe_folder, placed + [MANIFEST], ["OptiScaler"])
@@ -611,7 +643,7 @@ RE_VK_MODEL = re.compile(r"model: (FP8|INT8 RDNA2|INT8 Lite|INT8|None)")
 RE_RES = re.compile(r"Render Resolution: (\d+)x(\d+), Display Resolution (\d+)x(\d+)")
 RE_INPUT_RES = re.compile(r"Input Resolution: (\d+)x(\d+)")
 RE_HOOKED_LITE = re.compile(r"Hooked the support check of ffxProvider_FSR4Lite_Int8 in (\S+)")
-RE_DRIVER_CTX = re.compile(r"Created driver upscaler context, result: (\S+)")
+RE_DRIVER_CTX = re.compile(r"Created driver upscaler context, result: (.+?)\s*$")
 RE_DISPATCH_ERR = re.compile(r"_dispatch error|Dispatch error|dispatch failed", re.IGNORECASE)
 RE_GPU = re.compile(r"Upscaler support - fsr4: ([^,\n]+)")
 RE_FEATURE = re.compile(r"(?:Creating (?:new )?(\S+(?: \S+)?) upscaler(?: feature)?|init successful for (.+?), upscaler changed)")
@@ -668,6 +700,12 @@ def parse_log(text):
     return res
 
 
+def context_ok(result):
+    """OptiScaler prints the FFX return code as text ("The operation was successful.") or as a name (OK)."""
+    r = result.strip().upper()
+    return "SUCCESS" in r or r in ("OK", "0") or r.startswith("FFX_API_RETURN_OK")
+
+
 def judge(parsed, mode="lite"):
     """Decide what the log proves. Lite is 'active' only with provider 4.1.2 + INT8 Lite + real dispatches."""
     prov412 = [p for p in parsed["providers"] if PROVIDER_VERSION in p["name"]]
@@ -676,7 +714,7 @@ def judge(parsed, mode="lite"):
         "liteModel": parsed["activeModel"] == "INT8 Lite"
         and not any(v for k, v in parsed["models"].items() if k != "INT8 Lite"),
         "dispatched": parsed["dispatches"] > 0
-        and (parsed["driverContext"] is None or "OK" in parsed["driverContext"].upper()),
+        and (parsed["driverContext"] is None or context_ok(parsed["driverContext"])),
         "noDispatchErrors": parsed["dispatchErrors"] == 0,
         "resolution": bool(parsed["resolutions"]),
     }

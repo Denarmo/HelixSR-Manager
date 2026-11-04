@@ -154,6 +154,11 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(g["optiDllName"], "winmm.dll")
         self.assertIn("winmm=n,b", g["protonLaunchOptions"])
         self.assertTrue(os.path.isfile(os.path.join(folder, "winmm.dll")))
+        with open(os.path.join(folder, "OptiScaler.ini"), encoding="utf-8", errors="ignore") as f:
+            ini = f.read()
+        # DX11 games (most Unity games) reach HelixSR through DX11-on-12, not OptiScaler's built-in FSR 2.2.
+        self.assertRegex(ini, r"(?m)^Dx11Upscaler\s*=\s*fsr31_12")
+        self.assertRegex(ini, r"(?m)^Dx12Upscaler\s*=\s*fsr31")
         cached = [x for x in self.call("list_games")["games"] if x["folder"] == g["folder"]][0]
         self.assertTrue(cached["installed"])
         res = self.call("uninstall", {"folder": folder})

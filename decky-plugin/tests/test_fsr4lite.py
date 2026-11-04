@@ -99,6 +99,32 @@ class LogTest(unittest.TestCase):
         v = fsr4lite.judge(fsr4lite.parse_log(LOG_LITE + "[x] [error] _dispatch error: FFX_API_RETURN_ERROR\n"))
         self.assertFalse(v["active"])
 
+    def test_real_handheld_log_lines(self):
+        # Copied from over the hill (Unity 6, DX11 via dx11on12, Proton 11) on the Legion Go S, 2026-11-04.
+        log = (
+            "[07:49:45.450645] [I] NVSDK_NGX_D3D11_CreateFeature Creating new FSR 3.X w/Dx12 feature\n"
+            "[07:49:45.450795] [I] IFeature::SetInitParameters Render Resolution: 1920x1200, "
+            "Display Resolution 1920x1200, Quality: 2\n"
+            "                          Upscaler support - fsr4: int8 lite (forced), dlss: false\n"
+            "[07:49:46.012126] [I] FSR4Models::Hook Hooked the support check of ffxProvider_FSR4Lite_Int8 in amdxcffx64.dll\n"
+            "[07:49:46.126927] [I] FSR4DriverDll::QueryProvider amdxcffx64.dll provider for 10000: 4.1.2 *, "
+            "id: F5A5CA1E81001002, struct version: 2\n"
+            "[07:49:46.134554] [D] `anonymous-namespace'::hkIsSupported INT8 Lite: true\n"
+            "[07:49:46.177370] [I] FSR4DriverProviderDx12::CreateContext Created driver upscaler context, "
+            "result: The operation was successful.\n"
+            "[07:49:46.681971] [D] FFXFeatureDx12::EvaluateInternal Input Resolution: 1920x1200\n"
+            "[07:49:46.682000] [D] FFXFeatureDx12::EvaluateInternal Dispatch!!\n"
+        )
+        p = fsr4lite.parse_log(log)
+        self.assertEqual(p["driverContext"], "The operation was successful.")
+        self.assertEqual(p["fsr4Gpu"], "int8 lite (forced)")
+        v = fsr4lite.judge(p)
+        self.assertTrue(v["active"], v)
+        self.assertEqual((v["input"], v["output"]), ("1920x1200", "1920x1200"))
+        failed = fsr4lite.judge(fsr4lite.parse_log(log.replace("The operation was successful.", "FFX_API_RETURN_ERROR")))
+        self.assertFalse(failed["active"])
+        self.assertIn("dispatched", failed["missing"])
+
     def test_vulkan_lines(self):
         log = ("[i] Using driver provided FSR 4.1.2\n"
                "[i] Render Resolution: 960x540, Display Resolution 1920x1080, Quality: 2\n"
@@ -144,6 +170,25 @@ class GameTest(unittest.TestCase):
         for root, _, files in os.walk(self.game_dir):
             out += [os.path.relpath(os.path.join(root, f), self.game_dir) for f in files]
         return sorted(out)
+
+    def test_unity_game_without_exe_name_is_eligible_and_gets_dxgi_spoofing(self):
+        # over the hill: the engine left exeName empty (UnityCrashHandler64.exe sits next to the game exe).
+        for n in ("UnityCrashHandler64.exe", "over the hill.exe"):
+            with open(os.path.join(self.exe_dir, n), "wb") as f:
+                f.write(b"MZ")
+        os.remove(os.path.join(self.exe_dir, "Game.exe"))
+        game = dict(self.game, exeName=None, isUnity=True)
+        self.assertEqual(fsr4lite.find_game_exe(self.exe_dir), "over the hill.exe")
+        self.assertTrue(fsr4lite.eligibility(game)["eligible"])
+        self.assertEqual(fsr4lite.game_extra_ini(game), [["Spoofing", "Dxgi", "true"]])
+        self.assertEqual(fsr4lite.game_extra_ini(dict(game, isUnity=False)), [])
+        fsr4lite.install(game, "dxgi.dll")
+        with open(os.path.join(self.exe_dir, "OptiScaler.ini"), encoding="utf-8") as f:
+            ini = f.read()
+        self.assertEqual(fsr4lite.get_ini_value(ini, "Spoofing", "Dxgi"), "true")
+        fsr4lite.set_mode(self.exe_dir, "fallback")
+        with open(os.path.join(self.exe_dir, "OptiScaler.ini"), encoding="utf-8") as f:
+            self.assertEqual(fsr4lite.get_ini_value(f.read(), "Spoofing", "Dxgi"), "true")
 
     def test_install_and_uninstall_restore_the_folder(self):
         before = self.listing()

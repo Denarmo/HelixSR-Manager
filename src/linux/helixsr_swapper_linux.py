@@ -498,6 +498,11 @@ def format_unity_version(version):
     return f"Unity {parts[0]}.{parts[1]}"
 
 
+def unity_has_dlss(game):
+    """True for a Unity game that ships NVIDIA's DLSS (nvngx_dlss.dll, usually in <exe>_Data/Plugins/x86_64)."""
+    return bool(game.get("isUnity")) and ("DLSS" in (game.get("inputs") or []) or bool(game.get("foundNvngxDlssPath")))
+
+
 def detect_unity(exe_dir, exe_name):
     """Unity profile of a game folder, or None when the game is not a Unity game."""
     if not exe_dir or not os.path.isdir(exe_dir):
@@ -1458,6 +1463,14 @@ def install_helixsr(game_folder, route_override=None, opti_dll=None, use_fakenva
             with open(game_ini, "r", encoding="utf-8", errors="ignore") as f:
                 txt = f.read()
             txt = set_ini_value(txt, "Dx12Upscaler", "fsr31", "Upscalers")
+            # DX11 games (most Unity games, which default to Direct3D 11) reach HelixSR through DX11-on-12.
+            # Without this OptiScaler falls back to its built-in FSR 2.2 and HelixSR never runs.
+            txt = set_ini_value(txt, "Dx11Upscaler", "fsr31_12", "Upscalers")
+            # OptiScaler turns DXGI GPU spoofing off for Unity by default ("Quirk: Dxgi spoofing disabled"), so Unity
+            # games with DLSS (for example the TND upscaling framework) see an AMD GPU, never create DLSS and pick
+            # their own shader upscaler, which OptiScaler cannot intercept. Spoofing brings the DLSS path back.
+            if unity_has_dlss(game):
+                txt = set_ini_value(txt, "Dxgi", "true", "Spoofing")
             txt = set_ini_value(txt, "FfxDx12Path", f"HelixSR\\{OWN_DLL}", "Libraries")
             txt = set_ini_value(txt, "FfxDx12SRPath", f"HelixSR\\{OWN_SR_DLL}", "Libraries")
 

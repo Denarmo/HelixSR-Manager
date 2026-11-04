@@ -16,11 +16,12 @@ Future<(AppModel, FakeEngine)> pump(
   bool console = false,
   String theme = 'paper',
   bool built = true,
+  bool built3 = false,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final engine = FakeEngine(built: built);
+  final engine = FakeEngine(built: built, built3: built3);
   final settings = Settings(
     theme: theme,
     uiMode: console ? 'console' : 'desktop',
@@ -91,6 +92,34 @@ void main() {
       expect(m.selected!.useFakeNvapi, isTrue);
     });
 
+    testWidgets('HelixSR Scaler needs HelixSR 3 built, then installs', (
+      tester,
+    ) async {
+      await pump(tester);
+      await tester.tap(find.text('HOGWARTS_LEGACY'));
+      await tester.pump();
+      await tester.ensureVisible(find.text('HELIXSR SCALER'));
+      await tester.tap(find.text('HELIXSR SCALER'));
+      await tester.pump();
+      expect(find.textContaining('not built yet'), findsOneWidget);
+
+      final (_, engine) = await pump(tester, built3: true);
+      await tester.tap(find.text('HOGWARTS_LEGACY'));
+      await tester.pump();
+      await tester.ensureVisible(find.text('HELIXSR SCALER'));
+      await tester.tap(find.text('HELIXSR SCALER'));
+      await tester.pump();
+      expect(find.textContaining('not built yet'), findsNothing);
+      await tester.ensureVisible(find.text('VERSION.DLL'));
+      await tester.tap(find.text('VERSION.DLL'));
+      await tester.pump();
+      await tester.ensureVisible(find.text('INSTALL'));
+      await tester.tap(find.text('INSTALL'));
+      await tester.pump();
+      await tester.pump();
+      expect(engine.installs.single, 'Hogwarts Legacy:scaler:version.dll:auto');
+    });
+
     testWidgets('filter and search narrow the table', (tester) async {
       final (m, _) = await pump(tester);
       await tester.tap(find.text('[ ]RE ENGINE(3)'));
@@ -108,15 +137,23 @@ void main() {
     });
 
     testWidgets('engine and settings pages', (tester) async {
-      final (m, _) = await pump(tester);
+      final (m, e) = await pump(tester);
       await tester.tap(find.text('ENGINE').first);
       await tester.pump();
       expect(find.text('embedded in amd_fidelityfx_dx12.dll'), findsOneWidget);
       await shot(tester, 'desktop-engine');
-      await tester.tap(find.text('BUILD NETWORK'));
+      await tester.ensureVisible(find.text('BUILD 1.8.1 NETWORK'));
+      await tester.tap(find.text('BUILD 1.8.1 NETWORK'));
       await tester.pump();
       await tester.pump();
       expect(m.buildLog, contains('Build finished successfully!'));
+      expect(e.lastBuildCore, 'legacy');
+      expect(find.text('HELIXSR $helixSr3Version'), findsOneWidget);
+      await tester.ensureVisible(find.text('DOWNLOAD + BUILD'));
+      await tester.tap(find.text('DOWNLOAD + BUILD'));
+      await tester.pump();
+      await tester.pump();
+      expect(e.lastBuildCore, 'helixsr3');
       await tester.tap(find.text('SETTINGS').first);
       await tester.pump();
       await tester.tap(find.text('INK'));
@@ -189,7 +226,11 @@ void main() {
       PadBus.emit(PadAction.rb);
       await tester.pump();
       await tester.pump();
-      expect(find.text('BUILD NETWORK'), findsOneWidget);
+      expect(find.text('BUILD 1.8.1 NETWORK'), findsOneWidget);
+      expect(
+        find.text('DOWNLOAD + BUILD HELIXSR $helixSr3Version'),
+        findsOneWidget,
+      );
       await shot(tester, 'console-engine');
       PadBus.emit(PadAction.rb);
       await tester.pump();

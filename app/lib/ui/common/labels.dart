@@ -1,9 +1,11 @@
 import '../../engine/engine.dart';
 
 String routeName(String route) => switch (route) {
-  'optiscaler' => 'OptiScaler',
-  'direct' => 'Direct FSR 3.1',
-  'dlss' => 'DLSS Loader',
+  'scaler' => 'HelixSR Scaler',
+  'hlxfsr' => 'HLX FSR 4',
+  'optiscaler' => '1.8.1 OptiScaler',
+  'direct' => '1.8.1 Direct FSR',
+  'dlss' => '1.8.1 DLSS Loader',
   _ => route,
 };
 
@@ -22,12 +24,22 @@ String fsr4Name(String variant) => switch (variant) {
   _ => variant,
 };
 
-/// Routes offered for [g]; the experimental loader only when the core has it.
-List<String> routeChoices(CoreStatus? core) => [
+/// Routes offered for [g]: HelixSR 3's HelixSR Scaler first (the HLX FSR 4
+/// drop-in for games with FSR 3.1), then the bundled 1.8.1 ways; the
+/// experimental loader only when the core has it.
+List<String> routeChoices(CoreStatus? core, [GameInfo? g]) => [
+  'scaler',
+  if (g == null || g.fsrTargets.isNotEmpty || g.installedRoute == 'hlxfsr')
+    'hlxfsr',
   'optiscaler',
   'direct',
   if (core?.dlssLoaderAvailable ?? false) 'dlss',
 ];
+
+/// What to tell the user when [route] cannot be installed yet.
+String notReadyText(String route) => helixSr3Routes.contains(route)
+    ? '> HelixSR $helixSr3Version not built yet: open ENGINE and download + build it first'
+    : '> network not built yet: open ENGINE and build it first';
 
 String formatBytes(int n) {
   if (n <= 0) return '0 B';

@@ -3,6 +3,7 @@
 library;
 
 import 'constants.dart';
+import 'helixsr3.dart' show HelixSr3Status, helixSr3Routes;
 
 class GameInfo {
   GameInfo({
@@ -39,8 +40,17 @@ class GameInfo {
   /// FSR 4 model for handhelds / RDNA 2-3).
   String fsr4Variant = 'full';
 
-  /// "optiscaler", "direct" or "dlss" (experimental HelixSR DLSS loader).
+  /// "optiscaler", "direct" or "dlss" (experimental HelixSR DLSS loader) for
+  /// the bundled HelixSR 1.8.1; "scaler" (HelixSR Scaler) or "hlxfsr" (HLX FSR
+  /// 4 drop-in) for HelixSR 3 ([helixSr3Routes]). The UI edits it; what is on
+  /// disk is [installedRoute].
   String route = 'optiscaler';
+
+  /// The route found installed by the scan (null when nothing is installed).
+  String? installedRoute;
+
+  /// HelixSR Scaler's version from its install record (route "scaler").
+  String? scalerVersion;
 
   /// One of [optiDllNames].
   String optiDllName = 'dxgi.dll';
@@ -63,6 +73,10 @@ class GameInfo {
 
   String get routeDisplay {
     switch (route) {
+      case 'scaler':
+        return 'HelixSR Scaler (${optiDllName.isEmpty ? 'dxgi.dll' : optiDllName})';
+      case 'hlxfsr':
+        return 'HLX FSR 4 drop-in';
       case 'direct':
         return 'Direct FSR 3.1';
       case 'dlss':
@@ -87,6 +101,13 @@ class GameInfo {
       final opti = optiDllName.isEmpty ? 'dxgi.dll' : optiDllName;
       if (opti.toLowerCase().endsWith('.dll')) {
         dlls.add(opti.substring(0, opti.length - 4));
+      }
+    } else if (route == 'scaler') {
+      // Upstream: Proton already loads the game's own dxgi.dll.
+      final name = (optiDllName.isEmpty ? 'dxgi.dll' : optiDllName)
+          .toLowerCase();
+      if (name != 'dxgi.dll' && name.endsWith('.dll')) {
+        dlls.add(name.substring(0, name.length - 4));
       }
     } else if (route == 'dlss') {
       dlls.add(loaderDll.substring(0, loaderDll.length - 4));
@@ -165,6 +186,7 @@ String fgModeTag(String mode) {
 
 class CoreStatus {
   const CoreStatus({
+    this.helixSr3,
     required this.version,
     required this.coreDir,
     required this.coreExists,
@@ -191,6 +213,14 @@ class CoreStatus {
   final bool dlssLoaderAvailable;
 
   bool get weightsBuilt => networkEmbedded || networkSeparate;
+
+  /// The HelixSR 3 release (downloaded / built), null when not checked.
+  final HelixSr3Status? helixSr3;
+
+  /// Whether a game can be installed with [route] now.
+  bool routeReady(String route) => helixSr3Routes.contains(route)
+      ? (helixSr3?.ready(route) ?? false)
+      : weightsBuilt;
 }
 
 class GpuInfo {

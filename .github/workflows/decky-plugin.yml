@@ -2,10 +2,10 @@ name: Decky plugin
 
 on:
   pull_request:
-    paths: ["decky-plugin/**", "src/linux/**", "helixsr_core/**", ".github/workflows/decky-plugin.yml"]
+    paths: ["decky-plugin/**", "src/linux/**", "helixsr_core/**", "tests/python/**", ".github/workflows/decky-plugin.yml"]
   push:
     branches: [main]
-    paths: ["decky-plugin/**", "src/linux/**", "helixsr_core/**", ".github/workflows/decky-plugin.yml"]
+    paths: ["decky-plugin/**", "src/linux/**", "helixsr_core/**", "tests/python/**", ".github/workflows/decky-plugin.yml"]
   workflow_dispatch:
 
 permissions:
@@ -28,6 +28,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: python3 -m unittest discover -s tests -v
+      - run: python3 -m unittest discover -s ../tests/python -v
       - run: bash scripts/package.sh
       - uses: actions/upload-artifact@v4
         with:

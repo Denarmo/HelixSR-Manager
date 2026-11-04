@@ -237,13 +237,15 @@ class AppModel extends ChangeNotifier {
     }
   }
 
-  Future<void> build({String dlssPath = ''}) async {
+  /// [release]: "legacy" (bundled HelixSR 1.8.1) or "helixsr3".
+  Future<void> build({String dlssPath = '', String release = 'legacy'}) async {
     if (building) return;
     building = true;
     buildLog.clear();
     notifyListeners();
     try {
       await engine.buildNetwork(
+        core: release,
         dlssPath: dlssPath,
         log: (l) {
           buildLog.add(l);

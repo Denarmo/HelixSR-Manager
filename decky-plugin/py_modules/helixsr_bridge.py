@@ -217,13 +217,45 @@ def _slim(game):
     out = {k: game.get(k) for k in GAME_KEYS if k in game}
     if out.get("appId") is not None:
         out["appId"] = str(out["appId"])
+    exe = (game.get("exeName") or "").lower()
+    out["native"] = None
+    if not exe.endswith(".exe"):
+        out["native"] = native_linux_exe(game.get("folder"))
     try:
         import fsr4lite
 
         out["lite"] = dict(fsr4lite.game_state(game.get("exeFolder")), **fsr4lite.eligibility(game))
     except Exception as e:  # never hide a game because of the Lite check
         out["lite"] = {"installed": False, "eligible": False, "reasons": [str(e)], "inputs": [], "inputsKnown": False}
+    if out["native"]:
+        out["lite"]["reasons"] = ["Native Linux game: OptiScaler, HelixSR and FSR 4 Lite only work in Windows games running through Proton"]
     return out
+
+
+def native_linux_exe(folder, max_depth=2):
+    """Name of a native Linux game executable (an ELF program, not a library) in the folder, or None."""
+    if not folder or not os.path.isdir(folder):
+        return None
+    base = folder.rstrip("/").count("/")
+    for root, dirs, files in os.walk(folder):
+        if root.count("/") - base >= max_depth:
+            dirs[:] = []
+        for f in sorted(files):
+            low = f.lower()
+            if ".so" in low or low.endswith((".dll", ".txt", ".json", ".py")):
+                continue
+            p = os.path.join(root, f)
+            try:
+                if not os.access(p, os.X_OK) or os.path.getsize(p) < 4096:
+                    continue
+                with open(p, "rb") as fh:
+                    head = fh.read(18)
+            except Exception:
+                continue
+            # ELF, e_type 2 = executable, 3 = PIE executable (shared libraries are filtered by name above)
+            if head[:4] == b"\x7fELF" and head[16] in (2, 3):
+                return os.path.relpath(p, folder)
+    return None
 
 
 # Steam tools and runtimes the engine's folder scan picks up; they are not games.
@@ -242,7 +274,8 @@ def is_game(g):
     if str(g.get("appId") or "") in NOT_GAMES_APPIDS or NOT_GAMES_RE.search(g.get("name") or ""):
         return False
     exe = (g.get("exeName") or "").lower()
-    return exe.endswith(".exe")
+    # Native Linux games are listed too (as not supported) so the user sees why nothing applies to them.
+    return exe.endswith(".exe") or bool(g.get("native"))
 
 
 def _cache_path():
@@ -257,7 +290,7 @@ def list_games(refresh=False):
                 data = json.load(f)
             games = data.get("games") if isinstance(data, dict) else None
             # A cache from before the FSR 4 Lite check (no "lite" field) is rescanned once.
-            if isinstance(games, list) and all(isinstance(g, dict) and "lite" in g for g in games):
+            if isinstance(games, list) and all(isinstance(g, dict) and "lite" in g and "native" in g for g in games):
                 data["games"] = [g for g in games if is_game(g)]
                 return data
         except Exception:

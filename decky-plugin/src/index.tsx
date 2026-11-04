@@ -46,6 +46,7 @@ interface Game {
   protonLaunchOptions?: string;
   fsr4Variant?: string | null;
   lite?: LiteGame;
+  native?: string | null;
 }
 
 interface LiteVerification {
@@ -673,7 +674,7 @@ function Content() {
             disabled={!games.length || !!busy}
             rgOptions={games.map((g) => ({
               data: g.folder,
-              label: `${g.installed ? "● " : ""}${g.name}${g.folder === runningFolder ? " (running)" : ""}`,
+              label: `${g.installed || g.lite?.installed ? "● " : ""}${g.name}${g.native ? " (native Linux)" : ""}${g.folder === runningFolder ? " (running)" : ""}`,
             }))}
             selectedOption={folder}
             onChange={(o) => setFolder(o.data)}
@@ -684,7 +685,13 @@ function Content() {
           <>
             <PanelSectionRow>
               <Field label="Status" focusable={false}>
-                {game.installed ? `${game.routeDisplay} · ${game.version ?? ""}` : "Not installed"}
+                {game.native
+                  ? "Native Linux game: not supported"
+                  : game.lite?.installed
+                    ? `FSR 4 Lite · ${game.lite.label ?? ""}`
+                    : game.installed
+                      ? `${game.routeDisplay} · ${game.version ?? ""}`
+                      : "Not installed"}
               </Field>
             </PanelSectionRow>
             {!!game.inputs?.length && (
@@ -698,7 +705,18 @@ function Content() {
         )}
       </PanelSection>
 
-      {game && (
+      {game?.native && (
+        <PanelSection>
+          <PanelSectionRow>
+            <div style={{ fontSize: 11, opacity: 0.7 }}>
+              {game.name} runs natively on Linux. HelixSR, OptiScaler and FSR 4 Lite hook Windows DirectX/Vulkan games
+              running through Proton, so there is nothing to install for it.
+            </div>
+          </PanelSectionRow>
+        </PanelSection>
+      )}
+
+      {game && !game.native && (
         <PanelSection title={game.installed || game.lite?.installed ? "Change" : "Install with"}>
           <PanelSectionRow>
             <DropdownItem

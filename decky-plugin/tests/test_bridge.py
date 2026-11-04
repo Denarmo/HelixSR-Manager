@@ -107,6 +107,38 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(found["appId"], "1002")
         self.assertIsNone(self.call("find_app", {"appId": "999"})["game"])
 
+    def write_manifest(self, appid, name, inst):
+        steamapps = os.path.dirname(self.common)
+        lines = ['"AppState"', "{", f'\t"appid"\t\t"{appid}"', f'\t"name"\t\t"{name}"', f'\t"installdir"\t\t"{inst}"', "}"]
+        os.makedirs(os.path.join(self.common, inst), exist_ok=True)
+        with open(os.path.join(steamapps, f"appmanifest_{appid}.acf"), "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+    def test_native_linux_game_listed_as_unsupported_and_leftovers_hidden(self):
+        elf = bytes([0x7F]) + b"ELF"
+        native = os.path.join(self.common, "NativeGame")
+        os.makedirs(native)
+        exe = os.path.join(native, "NativeGame.x86_64")
+        with open(exe, "wb") as f:
+            # e_ident (16 bytes) then e_type = 2 (executable)
+            f.write(elf + bytes([2, 1, 1]) + bytes(9) + bytes([2, 0]) + bytes(8192))
+        os.chmod(exe, 0o755)
+        with open(os.path.join(native, "UnityPlayer.so"), "wb") as f:
+            f.write(elf + bytes(8192))
+        os.makedirs(os.path.join(self.common, "Leftover", "DS"))
+        self.write_manifest("1003", "Native Game", "NativeGame")
+        self.write_manifest("1004", "Leftover", "Leftover")
+        self.write_manifest("228980", "Steamworks Common Redistributables", "Steamworks Shared")
+        games = {g["name"]: g for g in self.call("list_games", {"refresh": True})["games"]}
+        self.assertIn("Native Game", games)
+        self.assertEqual(games["Native Game"]["native"], "NativeGame.x86_64")
+        self.assertFalse(games["Native Game"]["lite"]["eligible"])
+        self.assertIn("Native Linux", games["Native Game"]["lite"]["reasons"][0])
+        self.assertNotIn("Leftover", games)
+        self.assertNotIn("Steamworks Common Redistributables", games)
+        self.assertIsNone(games["Fake DLSS Game"]["native"])
+        self.assertEqual(self.call("find_app", {"appId": "1003"})["game"]["name"], "Native Game")
+
     def test_install_needs_built_network(self):
         res = self.call("install", {"folder": os.path.join(self.common, "FakeDLSS"), "options": {"route": "optiscaler"}})
         self.assertFalse(res["success"])

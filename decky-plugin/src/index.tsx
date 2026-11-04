@@ -14,13 +14,14 @@ import {
 import { callable, definePlugin, toaster } from "@decky/api";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FaBolt } from "react-icons/fa";
-import { applyOverrides, overridesFrom } from "./launchOptions";
+import { addTracked, applyOverrides, LaunchRecord, overridesFrom, restoreTracked } from "./launchOptions";
 
 // ---------------------------------------------------------------------------
 // Backend (main.py)
 // ---------------------------------------------------------------------------
 
 type Route = "optiscaler" | "direct" | "dlss";
+type Method = Route | "fsr4lite";
 
 interface Game {
   id: string;
@@ -44,6 +45,47 @@ interface Game {
   inputs?: string[];
   protonLaunchOptions?: string;
   fsr4Variant?: string | null;
+  lite?: LiteGame;
+}
+
+interface LiteVerification {
+  active: boolean;
+  state?: string;
+  checks?: Record<string, boolean>;
+  missing?: string[];
+  provider?: { dll: string; name: string } | null;
+  model?: string | null;
+  dispatches?: number;
+  input?: string | null;
+  output?: string | null;
+  checkedAt?: number;
+  message?: string;
+}
+
+interface LiteGame {
+  installed: boolean;
+  mode?: "lite" | "fallback";
+  proxy?: string;
+  label?: string;
+  launchOverride?: string;
+  launchOptions?: string;
+  verification?: LiteVerification | null;
+  eligible: boolean;
+  reasons: string[];
+  inputs: string[];
+  inputsKnown: boolean;
+}
+
+interface LiteStatus {
+  runtime: {
+    ready: boolean;
+    optiscaler: string;
+    optiscalerBuild: string;
+    payloadSize: number;
+    providers: Record<string, { file: string; has412?: boolean; hasLiteModel?: boolean; providerVersions?: string[]; fileVersion?: string }>;
+  };
+  device: { cpu: string; amdGpu: boolean; preferLite: boolean };
+  error?: string;
 }
 
 interface Option {
@@ -86,6 +128,8 @@ interface BuildState {
 interface Settings {
   autoLaunchOptions?: boolean;
   launchOverrides?: Record<string, string[]>;
+  liteLaunch?: Record<string, LaunchRecord & { dll: string }>;
+  lastFolder?: string | null;
   [k: string]: unknown;
 }
 
@@ -99,6 +143,16 @@ const getSettings = callable<[], Settings>("get_settings");
 const setSettings = callable<[settings: Settings], Settings>("set_settings");
 const startBuild = callable<[], Result>("start_build");
 const buildStatus = callable<[], BuildState>("build_status");
+const liteStatus = callable<[], LiteStatus>("lite_status");
+const litePrepare = callable<[], Result & { runtime?: LiteStatus["runtime"] }>("lite_prepare");
+const liteInstall = callable<[folder: string, proxy: string, mode: string], Result>("lite_install");
+const liteUninstall = callable<[folder: string], Result>("lite_uninstall");
+const liteMode = callable<[folder: string, mode: string], Result>("lite_mode");
+const liteVerify = callable<[folder: string], Result & { verification?: LiteVerification }>("lite_verify");
+
+// The Quick Access panel can be unmounted and mounted again (for example around a dropdown menu), which
+// would reset React state. The picked game lives here so the choice sticks.
+let pickedFolder: string | null = null;
 
 // ---------------------------------------------------------------------------
 // Steam launch options
@@ -142,9 +196,41 @@ async function syncLaunchOptions(game: Game, settings: Settings): Promise<{ opti
   return { options: next, settings: saved };
 }
 
+/** FSR 4 Lite: adds the proxy override and remembers the original options, so uninstall restores them exactly. */
+async function liteLaunchOn(game: Game, dll: string, settings: Settings): Promise<Settings | null> {
+  if (!game.appId || !(Number(game.appId) > 0)) return null;
+  const appId = Number(game.appId);
+  const all = { ...(settings.liteLaunch ?? {}) };
+  const prior = all[game.appId];
+  let current = await readLaunchOptions(appId);
+  if (prior && prior.dll !== dll) {
+    current = restoreTracked(current, prior);
+  }
+  const rec = addTracked(current, [dll], prior && prior.dll === dll ? prior : null);
+  if (prior && prior.dll !== dll) rec.original = prior.original;
+  if (rec.applied !== (await readLaunchOptions(appId))) SteamClient.Apps.SetAppLaunchOptions(appId, rec.applied);
+  all[game.appId] = { ...rec, dll };
+  return await setSettings({ liteLaunch: all });
+}
+
+async function liteLaunchOff(game: Game, settings: Settings): Promise<Settings | null> {
+  if (!game.appId) return null;
+  const all = { ...(settings.liteLaunch ?? {}) };
+  const rec = all[game.appId];
+  if (!rec) return null;
+  const appId = Number(game.appId);
+  const current = await readLaunchOptions(appId);
+  const next = restoreTracked(current, rec);
+  if (next !== current) SteamClient.Apps.SetAppLaunchOptions(appId, next);
+  delete all[game.appId];
+  return await setSettings({ liteLaunch: all });
+}
+
 // ---------------------------------------------------------------------------
 // UI
 // ---------------------------------------------------------------------------
+
+const LITE_METHOD = { id: "fsr4lite" as Method, label: "FSR 4 Lite (AMD 4.1.2 INT8, OptiScaler 10)" };
 
 const ROUTES: { id: Route; label: string }[] = [
   { id: "optiscaler", label: "OptiScaler (DLSS / XeSS / FSR games)" },
@@ -160,19 +246,24 @@ function Content() {
   const [status, setStatus] = useState<Status | null>(null);
   const [games, setGames] = useState<Game[]>([]);
   const [settings, setLocalSettings] = useState<Settings>({});
-  const [folder, setFolder] = useState<string | null>(null);
+  const [folder, setFolderState] = useState<string | null>(pickedFolder);
+  const setFolder = (f: string | null) => {
+    pickedFolder = f;
+    setFolderState(f);
+  };
+  const [lite, setLite] = useState<LiteStatus | null>(null);
   const [runningFolder, setRunningFolder] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [build, setBuild] = useState<BuildState | null>(null);
 
   // Per-install choices, reset whenever another game is picked.
-  const [route, setRoute] = useState<Route>("optiscaler");
+  const [route, setRoute] = useState<Method>("optiscaler");
+  const [liteProxy, setLiteProxy] = useState("dxgi.dll");
   const [optiDll, setOptiDll] = useState("dxgi.dll");
   const [fgMode, setFgMode] = useState("auto");
   const [fakeNvapi, setFakeNvapi] = useState(true);
   const [reframework, setReframework] = useState(false);
-  const [fsr4Variant, setFsr4Variant] = useState<string | null>(null);
 
   const game = useMemo(() => games.find((g) => g.folder === folder) ?? null, [games, folder]);
   const caps = status?.capabilities;
@@ -204,6 +295,7 @@ function Content() {
         if (st.error) throw new Error(st.error);
         setStatus(st);
         setLocalSettings(cfg ?? {});
+        liteStatus().then((l) => mounted.current && !l.error && setLite(l)).catch(() => undefined);
         if (st.building) setBuild({ state: "running", log: [] });
         const list = await loadGames(false);
         const app = Router.MainRunningApp;
@@ -212,11 +304,13 @@ function Content() {
           if (res.game) {
             upsertGame(res.game);
             setRunningFolder(res.game.folder);
-            setFolder(res.game.folder);
+            // The running game is picked unless the user already picked one this session.
+            if (!pickedFolder) setFolder(res.game.folder);
             return;
           }
         }
-        if (!list.length) await loadGames(true);
+        const fresh = list.length ? list : await loadGames(true);
+        if (!pickedFolder && cfg?.lastFolder && fresh.some((g) => g.folder === cfg.lastFolder)) setFolder(cfg.lastFolder);
       } catch (e) {
         setError(String(e));
       }
@@ -229,15 +323,20 @@ function Content() {
   // Reset the options to what the selected game has (or sensible defaults).
   useEffect(() => {
     if (!game) return;
-    setRoute(game.route === "dlss" && !caps?.dlssLoader ? "optiscaler" : game.route);
+    const helixRoute: Route = game.route === "dlss" && !caps?.dlssLoader ? "optiscaler" : game.route;
+    const preferLite = !!lite?.device.preferLite && !!game.lite?.eligible && !game.installed;
+    setRoute(game.lite?.installed || preferLite ? "fsr4lite" : helixRoute);
+    setLiteProxy(game.lite?.proxy || "dxgi.dll");
     setOptiDll(game.optiDllName || "dxgi.dll");
     setFgMode(game.fgMode || "auto");
     setFakeNvapi(game.useFakeNvapi !== false);
     setReframework(!!(game.installReFramework || game.isReEngine));
-    const variants = caps?.fsr4Variants ?? [];
-    const lite = variants.find((v) => v.id === "lite");
-    setFsr4Variant(game.fsr4Variant || lite?.id || variants[0]?.id || null);
-  }, [game?.folder, game?.installed, caps]);
+  }, [game?.folder, game?.installed, game?.lite?.installed, caps, lite?.device.preferLite]);
+
+  // Remember the last picked game across Quick Access openings.
+  useEffect(() => {
+    if (folder && folder !== settings.lastFolder) setSettings({ lastFolder: folder }).then((s) => mounted.current && setLocalSettings(s));
+  }, [folder]);
 
   // Poll the network build while it runs.
   useEffect(() => {
@@ -284,7 +383,6 @@ function Content() {
         opts.optiDll = optiDll;
         opts.fgMode = fgMode;
         opts.useFakeNvapi = fakeNvapi || fgMode.startsWith("dlssg_");
-        if (fsr4Variant && caps?.fsr4Variants.length) opts.fsr4Variant = fsr4Variant;
       }
       if (game.isReEngine) opts.installReFramework = reframework;
       const res = await installGame(game.folder, opts);
@@ -314,6 +412,90 @@ function Content() {
       const res = await clearCache(game.folder);
       if (res.success === false) throw new Error(res.error || "Could not clear the shader cache");
       notify("HelixSR", res.cleared === false ? "No shader cache found" : "Shader cache cleared");
+    });
+
+  // ----- FSR 4 Lite -----
+
+  const doLitePrepare = () =>
+    run("lite-prepare", async () => {
+      const res = await litePrepare();
+      if (!res.success) throw new Error(res.error || "Could not get the FSR 4 Lite runtime");
+      setLite(await liteStatus());
+      notify("FSR 4 Lite", "Runtime downloaded and checked: AMD provider 4.1.2 with the INT8 Lite model");
+    });
+
+  const liteEnable = async (g: Game) => {
+    const res = await liteInstall(g.folder, liteProxy, "lite");
+    if (!res.success) throw new Error(res.error || "Could not enable FSR 4 Lite");
+    if (res.game) {
+      upsertGame(res.game);
+      if (autoLaunch && res.game.lite?.launchOverride) {
+        const saved = await liteLaunchOn(res.game, res.game.lite.launchOverride, settings);
+        if (saved) setLocalSettings(saved);
+      }
+    }
+    notify("FSR 4 Lite", `Enabled for ${g.name}. Start the game and turn on its DLSS, XeSS or FSR.`);
+  };
+
+  const doLiteEnable = () => {
+    if (!game) return;
+    if (!game.installed) {
+      run("lite-install", () => liteEnable(game));
+      return;
+    }
+    showModal(
+      <ConfirmModal
+        strTitle="Switch to FSR 4 Lite"
+        strDescription={
+          `HelixSR is installed in ${game.name} and also uses OptiScaler, so it has to come out first. ` +
+          "Disabling FSR 4 Lite later does not put HelixSR back; you can reinstall it from here."
+        }
+        strOKButtonText="Remove HelixSR and enable Lite"
+        onOK={() =>
+          run("lite-install", async () => {
+            const un = await uninstallGame(game.folder);
+            if (!un.success) throw new Error(un.error || "Could not remove HelixSR");
+            if (un.game) {
+              upsertGame(un.game);
+              await applyLaunch(un.game);
+              await liteEnable(un.game);
+            }
+          })
+        }
+      />,
+    );
+  };
+
+  const doLiteDisable = () =>
+    run("lite-uninstall", async () => {
+      if (!game) return;
+      const res = await liteUninstall(game.folder);
+      if (!res.success) throw new Error(res.error || "Could not disable FSR 4 Lite");
+      if (res.game) upsertGame(res.game);
+      const saved = await liteLaunchOff(game, settings);
+      if (saved) setLocalSettings(saved);
+      notify("FSR 4 Lite", `Removed from ${game.name}; files and launch options restored`);
+    });
+
+  const doLiteMode = (fallback: boolean) =>
+    run("lite-mode", async () => {
+      if (!game) return;
+      const res = await liteMode(game.folder, fallback ? "fallback" : "lite");
+      if (!res.success) throw new Error(res.error || "Could not switch");
+      if (res.game) upsertGame(res.game);
+      notify("FSR 4 Lite", fallback ? "Fallback on: OptiScaler's built-in FSR 2.2 on the next launch" : "FSR 4 Lite on the next launch");
+    });
+
+  const doLiteVerify = () =>
+    run("lite-verify", async () => {
+      if (!game) return;
+      const res = await liteVerify(game.folder);
+      if (!res.success) throw new Error(res.error || "Could not read the OptiScaler log");
+      if (res.game) upsertGame(res.game);
+      const v = res.verification;
+      if (!v) return;
+      if (v.active) notify("FSR 4 Lite", `Active: ${v.provider?.name ?? "4.1.2"} INT8 Lite, ${v.input} to ${v.output}`);
+      else notify("FSR 4 Lite", v.message || `Not verified: ${(v.missing ?? []).join(", ") || "no data"}`);
     });
 
   const doBuild = () =>
@@ -350,6 +532,103 @@ function Content() {
       </PanelSection>
     );
   }
+
+  const renderLite = (g: Game) => {
+    const rt = lite?.runtime;
+    const lg = g.lite;
+    const v = lg?.verification;
+    const prov = rt?.providers ?? {};
+    const provLine = Object.values(prov)
+      .map((p) => `${p.file} ${p.fileVersion ?? ""}${p.has412 ? " · 4.1.2" : ""}${p.hasLiteModel ? " · INT8 Lite" : ""}`)
+      .join(" / ");
+    let statusText = "Not enabled";
+    if (lg?.installed) {
+      if (lg.mode === "fallback") statusText = "Fallback: OptiScaler's built-in FSR 2.2";
+      else if (v?.active) statusText = `Active · ${v.provider?.name ?? "FSR 4.1.2"} · ${v.model} · ${v.input} → ${v.output}`;
+      else if (v) statusText = `Enabled, not verified (${(v.missing ?? []).join(", ") || v.message || "no data"})`;
+      else statusText = "Enabled, not verified yet";
+    }
+    return (
+      <>
+        <PanelSectionRow>
+          <Field label="FSR 4 Lite" description={statusText} focusable={false} />
+        </PanelSectionRow>
+        {!rt?.ready ? (
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              disabled={!!busy || !lite}
+              description={`OptiScaler ${rt?.optiscaler ?? "10.0.0-pre1"} and AMD's driver FSR 4 providers, from the pinned Decky OptiScaler v0.0.9 release. Every file is checked by SHA-256.`}
+              onClick={doLitePrepare}
+            >
+              {busy === "lite-prepare" ? "Downloading and checking..." : `Download runtime (${Math.round((rt?.payloadSize ?? 108e6) / 1e6)} MB)`}
+            </ButtonItem>
+          </PanelSectionRow>
+        ) : (
+          <PanelSectionRow>
+            <Field label="Provider" description={provLine} focusable={false} />
+          </PanelSectionRow>
+        )}
+        {!lg?.installed ? (
+          <>
+            <PanelSectionRow>
+              <DropdownItem
+                label="OptiScaler proxy DLL"
+                description="If another mod already uses this name, the next free one is taken."
+                rgOptions={["dxgi.dll", "winmm.dll", "version.dll", "dbghelp.dll", "wininet.dll", "winhttp.dll"].map((d) => ({ data: d, label: d }))}
+                selectedOption={liteProxy}
+                onChange={(o) => setLiteProxy(o.data)}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ButtonItem layout="below" disabled={!rt?.ready || !!busy || !lg?.eligible} onClick={doLiteEnable}>
+                {busy === "lite-install" ? "Enabling..." : g.installed ? "Remove HelixSR and enable FSR 4 Lite" : "Enable FSR 4 Lite"}
+              </ButtonItem>
+            </PanelSectionRow>
+            {lg && !lg.inputsKnown && lg.eligible && (
+              <PanelSectionRow>
+                <div style={{ fontSize: 11, opacity: 0.7 }}>
+                  No DLSS, XeSS or FSR DLL found in the folder. Lite only works if the game has a temporal upscaler of its own.
+                </div>
+              </PanelSectionRow>
+            )}
+          </>
+        ) : (
+          <>
+            <PanelSectionRow>
+              <ButtonItem layout="below" disabled={!!busy} onClick={doLiteVerify}>
+                {busy === "lite-verify" ? "Reading the log..." : "Check what ran"}
+              </ButtonItem>
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ToggleField
+                label="Use fallback (FSR 2.2)"
+                description="If Lite does not run or looks wrong: OptiScaler's built-in FSR 2.2, no AMD DLL needed."
+                checked={lg.mode === "fallback"}
+                disabled={!!busy}
+                onChange={doLiteMode}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ButtonItem layout="below" disabled={!!busy} onClick={doLiteDisable}>
+                {busy === "lite-uninstall" ? "Removing..." : "Disable FSR 4 Lite (restore)"}
+              </ButtonItem>
+            </PanelSectionRow>
+            {(!autoLaunch || !g.appId) && lg.launchOptions && (
+              <PanelSectionRow>
+                <Field label="Launch options" description={lg.launchOptions} focusable={false} />
+              </PanelSectionRow>
+            )}
+            <PanelSectionRow>
+              <div style={{ fontSize: 11, opacity: 0.7 }}>
+                Start the game, pick DLSS, XeSS or FSR in its graphics settings, play a few seconds, then press Check.
+              </div>
+            </PanelSectionRow>
+          </>
+        )}
+      </>
+    );
+  };
 
   const ready = !!status?.weightsBuilt;
   const building = build?.state === "running";
@@ -420,29 +699,30 @@ function Content() {
       </PanelSection>
 
       {game && (
-        <PanelSection title={game.installed ? "Reinstall with" : "Install with"}>
+        <PanelSection title={game.installed || game.lite?.installed ? "Change" : "Install with"}>
           <PanelSectionRow>
             <DropdownItem
               label="Method"
-              rgOptions={ROUTES.filter((r) => r.id !== "dlss" || caps?.dlssLoader).map((r) => ({ data: r.id, label: r.label }))}
+              rgOptions={[
+                ...(game.lite?.eligible || game.lite?.installed ? [LITE_METHOD] : []),
+                ...ROUTES.filter((r) => r.id !== "dlss" || caps?.dlssLoader),
+              ].map((r) => ({ data: r.id, label: r.label }))}
               selectedOption={route}
               onChange={(o) => setRoute(o.data)}
             />
           </PanelSectionRow>
+          {!game.lite?.eligible && !game.lite?.installed && !!game.lite?.reasons?.length && (
+            <PanelSectionRow>
+              <div style={{ fontSize: 11, opacity: 0.7 }}>FSR 4 Lite: {game.lite.reasons.join("; ")}</div>
+            </PanelSectionRow>
+          )}
+
+          {route === "fsr4lite" && renderLite(game)}
+          {route !== "fsr4lite" && (
+            <>
 
           {route === "optiscaler" && (
             <>
-              {!!caps?.fsr4Variants.length && (
-                <PanelSectionRow>
-                  <DropdownItem
-                    label="FSR 4 model"
-                    description="Lite uses the lighter INT8 model, made for handheld APUs."
-                    rgOptions={caps.fsr4Variants.map((v) => ({ data: v.id, label: v.label }))}
-                    selectedOption={fsr4Variant}
-                    onChange={(o) => setFsr4Variant(o.data)}
-                  />
-                </PanelSectionRow>
-              )}
               <PanelSectionRow>
                 <DropdownItem
                   label="OptiScaler proxy DLL"
@@ -478,10 +758,15 @@ function Content() {
           )}
 
           <PanelSectionRow>
-            <ButtonItem layout="below" disabled={!ready || !!busy} onClick={doInstall}>
+            <ButtonItem layout="below" disabled={!ready || !!busy || !!game.lite?.installed} onClick={doInstall}>
               {busy === "install" ? "Installing..." : game.installed ? "Reinstall HelixSR" : "Install HelixSR"}
             </ButtonItem>
           </PanelSectionRow>
+          {game.lite?.installed && (
+            <PanelSectionRow>
+              <div style={{ fontSize: 11, opacity: 0.7 }}>FSR 4 Lite is enabled in this game; disable it first.</div>
+            </PanelSectionRow>
+          )}
           {game.installed && (
             <PanelSectionRow>
               <ButtonItem layout="below" disabled={!!busy} onClick={doUninstall}>
@@ -498,6 +783,8 @@ function Content() {
             <PanelSectionRow>
               <Field label="Launch options" description={game.protonLaunchOptions} focusable={false} />
             </PanelSectionRow>
+          )}
+            </>
           )}
           {runningFolder === game.folder && (
             <PanelSectionRow>

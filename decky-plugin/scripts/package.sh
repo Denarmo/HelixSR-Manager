@@ -23,13 +23,15 @@ mkdir -p "$STAGE/dist" "$STAGE/py_modules"
 cp dist/index.js "$STAGE/dist/"
 cp main.py plugin.json package.json README.md "$STAGE/"
 cp "$REPO/LICENSE" "$STAGE/LICENSE"
-cp py_modules/helixsr_bridge.py "$STAGE/py_modules/"
+cp py_modules/helixsr_bridge.py py_modules/fsr4lite.py "$STAGE/py_modules/"
 # The Manager's Linux engine, used as a library (one source of truth with the desktop app).
 cp "$REPO/src/linux/helixsr_swapper_linux.py" "$STAGE/py_modules/helixsr_engine.py"
 
 if [ "$WITH_CORE" = 1 ]; then
     mkdir -p "$STAGE/helixsr_core"
     for core in "$REPO"/helixsr_core/HelixSR-*; do
+        # Only real cores (a leftover folder with just a locally built network is skipped, never shipped).
+        [ -f "$core/amd_fidelityfx_dx12.dll" ] || { echo "skipping $(basename "$core") (no core DLL)"; continue; }
         dest="$STAGE/helixsr_core/$(basename "$core")"
         cp -r "$core" "$dest"
         # Never ship a locally compiled network (NVIDIA license / HelixSR license section 4).
@@ -43,6 +45,10 @@ if b"HXSRNET1" in data[-64:]:
 PY
     done
 fi
+
+# Shell and Python files must have LF endings on SteamOS (a Windows checkout may have converted them to CRLF,
+# which breaks `set -o pipefail` in the core's setup script).
+find "$STAGE" -type f \( -name '*.sh' -o -name '*.py' \) -exec sed -i 's/\r$//' {} +
 
 ZIP="$OUT/$NAME-decky-$VERSION.zip"
 rm -f "$ZIP"

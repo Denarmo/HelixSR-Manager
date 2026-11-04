@@ -14,6 +14,7 @@ bundled interpreter may not.
 import inspect
 import json
 import os
+import re
 import shutil
 import sys
 import threading
@@ -139,9 +140,8 @@ def resolve_core(engine):
             _core_note = src
             return c
     if os.path.isfile(os.path.join(bundled, engine.DLL_FSR)):
-        if _is_writable(bundled):
-            _core_note = "bundled"
-            return bundled
+        # Never build into the plugin's own folder: Decky replaces it on every plugin update, which would
+        # throw the user's built network away. The data-folder copy survives updates.
         try:
             os.makedirs(os.path.dirname(data_core), exist_ok=True)
             _copy_tree(bundled, data_core)
@@ -217,7 +217,32 @@ def _slim(game):
     out = {k: game.get(k) for k in GAME_KEYS if k in game}
     if out.get("appId") is not None:
         out["appId"] = str(out["appId"])
+    try:
+        import fsr4lite
+
+        out["lite"] = dict(fsr4lite.game_state(game.get("exeFolder")), **fsr4lite.eligibility(game))
+    except Exception as e:  # never hide a game because of the Lite check
+        out["lite"] = {"installed": False, "eligible": False, "reasons": [str(e)], "inputs": [], "inputsKnown": False}
     return out
+
+
+# Steam tools and runtimes the engine's folder scan picks up; they are not games.
+NOT_GAMES_APPIDS = {
+    "228980", "1070560", "1391110", "1628350", "1826330", "4183110", "1493710", "2180100", "2230260",
+    "961940", "1054830", "1113280", "1245040", "1420170", "1580130", "1887720", "2348590", "2805730",
+    "3658110", "4628710",
+}
+NOT_GAMES_RE = re.compile(r"^(proton\b|steam linux runtime|steamworks|steamvr)", re.IGNORECASE)
+
+
+def is_game(g):
+    """Drops Steam tools/runtimes and folders without a Windows executable (leftovers of uninstalled games)."""
+    if g.get("installed") or (g.get("lite") or {}).get("installed"):
+        return True
+    if str(g.get("appId") or "") in NOT_GAMES_APPIDS or NOT_GAMES_RE.search(g.get("name") or ""):
+        return False
+    exe = (g.get("exeName") or "").lower()
+    return exe.endswith(".exe")
 
 
 def _cache_path():
@@ -234,7 +259,7 @@ def list_games(refresh=False):
                 return data
         except Exception:
             pass
-    games = [_slim(g) for g in engine().scan_all_games()]
+    games = [g for g in (_slim(g) for g in engine().scan_all_games()) if is_game(g)]
     data = {"games": games, "scannedAt": int(time.time())}
     try:
         tmp = cache + ".tmp"
@@ -283,7 +308,7 @@ def find_app(appid):
             folder = os.path.join(m["libraryRoot"], "steamapps", "common", m["installdir"])
             if os.path.isdir(folder):
                 g = _slim(eng.scan_game(folder, m["installdir"], eng.get_steam_manifests()))
-                return g if g.get("route") else None
+                return g if g.get("route") and is_game(g) else None
     return None
 
 
@@ -426,7 +451,62 @@ def build_run(dlss_path=""):
     return {"success": ok}
 
 
+# ---------------------------------------------------------------------------
+# FSR 4 Lite (py_modules/fsr4lite.py)
+# ---------------------------------------------------------------------------
+
+def _full_game(folder):
+    eng = engine()
+    return eng.scan_game(folder, None, eng.get_steam_manifests())
+
+
+def lite_status():
+    import fsr4lite
+
+    return {"runtime": fsr4lite.runtime_status(), "device": fsr4lite.device_info()}
+
+
+def lite_prepare(payload_path=None):
+    import fsr4lite
+
+    return {"success": True, "runtime": fsr4lite.prepare_runtime(payload_path or None)}
+
+
+def lite_install(folder, proxy=None, mode="lite"):
+    import fsr4lite
+
+    st = fsr4lite.install(_full_game(folder), proxy or "dxgi.dll", mode or "lite")
+    return {"success": True, "lite": st, "game": game(folder)}
+
+
+def lite_uninstall(folder):
+    import fsr4lite
+
+    res = fsr4lite.uninstall(_full_game(folder)["exeFolder"])
+    return {"success": True, "removed": res["removed"], "game": game(folder)}
+
+
+def lite_mode(folder, mode, reason=None):
+    import fsr4lite
+
+    st = fsr4lite.set_mode(_full_game(folder)["exeFolder"], mode, reason)
+    return {"success": True, "lite": st, "game": game(folder)}
+
+
+def lite_verify(folder):
+    import fsr4lite
+
+    v = fsr4lite.verify(_full_game(folder)["exeFolder"])
+    return {"success": True, "verification": v, "game": game(folder)}
+
+
 COMMANDS = {
+    "lite_status": lambda a: lite_status(),
+    "lite_prepare": lambda a: lite_prepare(a.get("payloadPath")),
+    "lite_install": lambda a: lite_install(a["folder"], a.get("proxy"), a.get("mode") or "lite"),
+    "lite_uninstall": lambda a: lite_uninstall(a["folder"]),
+    "lite_mode": lambda a: lite_mode(a["folder"], a["mode"], a.get("reason")),
+    "lite_verify": lambda a: lite_verify(a["folder"]),
     "status": lambda a: status(),
     "capabilities": lambda a: capabilities(),
     "list_games": lambda a: list_games(bool(a.get("refresh"))),

@@ -1406,7 +1406,36 @@ def helixsr3_install(game, route, scaler_name=None):
         opts["scaler"] = os.path.join(release, HELIXSR3_SCALER_DIR)
         if scaler_name and scaler_name.lower() in SCALER_DLL_NAMES:
             opts["scaler_name"] = scaler_name.lower()
-    return helixsr3_bridge("install", release, **opts)
+    res = helixsr3_bridge("install", release, **opts)
+    if route == "scaler" and scaler_unity_spoofing(game):
+        res.setdefault("messages", []).append("Unity game with DLSS: GPU spoofing turned on in OptiScaler.ini")
+    return res
+
+
+def scaler_unity_spoofing(game):
+    """HelixSR Scaler is upstream's OptiScaler build, and OptiScaler turns DXGI GPU spoofing off for Unity games by
+    default. A Unity game with DLSS then sees an AMD / Intel GPU, never creates DLSS and uses its own upscaler, so
+    HLX DLSS never runs. Sets [Spoofing] Dxgi=true in the game's OptiScaler.ini, only while it is on auto (a value the
+    user picked in HelixSR Scaler's menu stays). Upstream keeps OptiScaler.ini across updates. True when written."""
+    if not unity_has_dlss(game):
+        return False
+    for d in dict.fromkeys(x for x in (game.get("exeFolder"), game.get("folder")) if x):
+        if not read_scaler_record(d):
+            continue
+        ini = os.path.join(d, "OptiScaler.ini")
+        if not os.path.isfile(ini):
+            return False
+        with open(ini, "r", encoding="utf-8", errors="ignore", newline="") as f:
+            txt = f.read()
+        m = re.search(r"(?m)^[ \t]*Dxgi[ \t]*=[ \t]*([^\r\n]*)", txt)
+        if m and m.group(1).strip().lower() not in ("", "auto"):
+            return False
+        txt = set_ini_value(txt, "Dxgi", "true", "Spoofing")
+        txt = re.sub(r"(?m)^Dxgi = true", "Dxgi=true", txt)  # upstream's style: Key=value
+        with open(ini, "w", encoding="utf-8", newline="") as f:
+            f.write(txt)
+        return True
+    return False
 
 
 def helixsr3_remove(game):

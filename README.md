@@ -144,6 +144,8 @@ Toggle with <kbd>F11</kbd> or the Console button. Cover shelf, LB/RB paging, X t
   - The game's original values are kept in `GameUserSettings.helixsr-backup.json` and put back on uninstall. Launch the game once before installing so `GameUserSettings.ini` exists.
 - **Unity Game Detection**:
   - Detects Unity games (`UnityPlayer.dll` / `<game>_Data`), reads the engine version, scripting backend (Mono / IL2CPP), render pipeline (Built-in / URP / HDRP) and whether the build ships the D3D12 player, and tags them with a `Unity` badge and a `Unity` filter pill. This is the first step of Unity support for games without DLSS or FSR; see [docs/unity-support.md](docs/unity-support.md) for the plan.
+  - Unity games with DLSS get `[Spoofing] Dxgi = true` in `OptiScaler.ini` (OptiScaler, and HelixSR Scaler while the setting is on auto). OptiScaler turns DXGI GPU spoofing off for Unity by default, so on AMD and Intel GPUs these games never created DLSS, used their own upscaler and HelixSR never ran.
+- **DX11 games**: the OptiScaler route sets `Dx11Upscaler = fsr31_12`, so DX11 games (most Unity games) reach HelixSR through DX11-on-12 instead of OptiScaler's built-in FSR 2.2.
 - **Shader Cache Purger, Live INI Editor, Log Viewer & Atomic Backups**:
   - One-click **Clear Shader Cache** button purges corrupted DX12 pipeline caches (`shader.cache2`, `piplinelist.bin`, `*shader*.bin`, and Linux Proton `DXVK_state_cache` / `fozpipelinesv6`).
   - Built-in **`OptiScaler.ini` editor** and live **`helixsr.log` / `OptiScaler.log` diagnostic viewer** inside the slide-out Game Drawer.

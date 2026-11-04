@@ -28,6 +28,14 @@ with open(os.path.join(release, "calls.jsonl"), "a") as f:
 if os.environ.get("FAKE_BRIDGE_FAIL"):
     print(json.dumps({"protocol": 1, "ok": False, "error": os.environ["FAKE_BRIDGE_FAIL"], "messages": []}))
     sys.exit(1)
+opts = dict(zip(rest[0::2], rest[1::2]))
+if cmd == "install" and opts.get("--way") == "scaler" and os.environ.get("FAKE_BRIDGE_SCALER_INI"):
+    # What upstream's installer leaves in the game: its record and HelixSR Scaler's OptiScaler.ini (CRLF, Key=value)
+    game = opts["--game"]
+    with open(os.path.join(game, "HelixSR-Scaler.files"), "w") as f:
+        f.write("# HelixSR Scaler, installed by HelixSR Desktop\n# version=1.2.0\nname=dxgi.dll\ndxgi.dll\n")
+    with open(os.path.join(game, "OptiScaler.ini"), "w", newline="") as f:
+        f.write(os.environ["FAKE_BRIDGE_SCALER_INI"])
 print("noise before the answer")
 print(json.dumps({"protocol": 1, "ok": True, "game": {"folder": rest[1] if len(rest) > 1 else None},
                   "messages": ["installed HelixSR Scaler"]}))
@@ -181,6 +189,60 @@ class HelixSR3Test(unittest.TestCase):
         self.assertEqual(args["--way"], "scaler")
         self.assertEqual(args["--scaler"], os.path.join(self.release, "helixsr-scaler"))
         self.assertEqual(args["--scaler-name"], "winmm.dll")
+
+    SCALER_INI = "[Upscalers]\r\nDx11Upscaler=auto\r\n\r\n[Spoofing]\r\nStreamlineSpoofing=auto\r\nDxgi=auto\r\nDxgiFactoryWrapping=auto\r\n"
+
+    def make_unity_game(self, name="UnityGame", dlss=True):
+        g = self.make_game(name)
+        write(os.path.join(g, "UnityPlayer.dll"))
+        write(os.path.join(g, name + "_Data", "globalgamemanagers"), b"\0" * 64)
+        if dlss:
+            write(os.path.join(g, name + "_Data", "Plugins", "x86_64", "nvngx_dlss.dll"))
+        return g
+
+    def scaler_ini(self, g):
+        with open(os.path.join(g, "OptiScaler.ini"), newline="") as f:
+            return f.read()
+
+    def test_install_scaler_turns_on_dxgi_spoofing_in_unity_dlss_game(self):
+        # OptiScaler turns DXGI spoofing off for Unity by default: without it the game never creates DLSS.
+        self.make_release()
+        os.environ["FAKE_BRIDGE_SCALER_INI"] = self.SCALER_INI
+        g = self.make_unity_game()
+        self.assertTrue(self.eng.unity_has_dlss(self.eng.scan_game(g)))
+        res = self.eng.install_helixsr(g, route_override="scaler")
+        self.assertIn("GPU spoofing", res["message"])
+        ini = self.scaler_ini(g)
+        self.assertIn("\r\nDxgi=true\r\n", ini)
+        self.assertIn("DxgiFactoryWrapping=auto", ini)
+        self.assertIn("StreamlineSpoofing=auto", ini)
+        self.assertIn("Dx11Upscaler=auto", ini)  # HelixSR Scaler runs DX11 through HelixSR on auto (ffx_12)
+
+    def test_install_scaler_keeps_users_dxgi_choice(self):
+        self.make_release()
+        os.environ["FAKE_BRIDGE_SCALER_INI"] = self.SCALER_INI.replace("Dxgi=auto", "Dxgi=false")
+        g = self.make_unity_game()
+        res = self.eng.install_helixsr(g, route_override="scaler")
+        self.assertNotIn("GPU spoofing", res["message"])
+        self.assertIn("Dxgi=false", self.scaler_ini(g))
+
+    def test_install_scaler_leaves_spoofing_alone_without_unity_dlss(self):
+        self.make_release()
+        os.environ["FAKE_BRIDGE_SCALER_INI"] = self.SCALER_INI
+        plain = self.make_game("Plain")
+        write(os.path.join(plain, "nvngx_dlss.dll"))
+        no_dlss = self.make_unity_game("NoDlss", dlss=False)
+        write(os.path.join(no_dlss, "amd_fidelityfx_dx12.dll"))
+        for g in (plain, no_dlss):
+            self.eng.install_helixsr(g, route_override="scaler")
+            self.assertIn("Dxgi=auto", self.scaler_ini(g), g)
+
+    def test_dropin_never_touches_spoofing(self):
+        self.make_release()
+        g = self.make_unity_game()
+        write(os.path.join(g, "amd_fidelityfx_upscaler_dx12.dll"))
+        self.eng.install_helixsr(g, route_override="hlxfsr")
+        self.assertFalse(os.path.exists(os.path.join(g, "OptiScaler.ini")))
 
     def test_install_scaler_ignores_asi_name(self):
         self.make_release()

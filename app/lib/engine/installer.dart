@@ -235,6 +235,17 @@ void _installOptiScaler(GameInfo game, Core core, void Function(String) say) {
     say('configuring OptiScaler.ini');
     var text = readText(gameIni);
     text = setIniValue(text, 'Dx12Upscaler', 'fsr31', 'Upscalers');
+    // DX11 games (most Unity games, which default to Direct3D 11) reach
+    // HelixSR through DX11-on-12. Without this OptiScaler falls back to its
+    // built-in FSR 2.2 and HelixSR never runs.
+    text = setIniValue(text, 'Dx11Upscaler', 'fsr31_12', 'Upscalers');
+    // OptiScaler turns DXGI GPU spoofing off for Unity by default, so Unity
+    // games with DLSS (for example the TND upscaling framework) see an AMD /
+    // Intel GPU, never create DLSS and pick their own shader upscaler, which
+    // OptiScaler cannot intercept. Spoofing brings the DLSS path back.
+    if (game.unityHasDlss) {
+      text = setIniValue(text, 'Dxgi', 'true', 'Spoofing');
+    }
     text = setIniValue(
       text,
       'FfxDx12Path',
